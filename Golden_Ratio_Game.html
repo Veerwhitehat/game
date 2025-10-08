@@ -149,9 +149,9 @@ const PHI_CONJUGATE = PHI - 1;
 const GRID_SIZE = 20;
 
 const Elements = {
-    BUILDING: { name: "Building", color: "#15803d", size: { width: 40, height: 120, depth: 40 }, weight: 200, icon: "🏢" },
+    BUILDING: { name: "Building", color: "#a0aec0", size: { width: 40, height: 120, depth: 40 }, weight: 200, icon: "🏢" },
     PARK: { name: "Park", color: "#34d399", size: { width: 80, height: 5, depth: 60 }, weight: 150, icon: "🌳" },
-    ROAD: { name: "Road", color: "#475569", size: { width: 20, height: 2, depth: 100 }, weight: 80, icon: "🛣️" }
+    ROAD: { name: "Road", color: "#4a5568", size: { width: 20, height: 2, depth: 100 }, weight: 80, icon: "🛣️" }
 };
 
 // --- Game State ---
@@ -221,26 +221,55 @@ function drawGuides() {
     scene.add(guideGroup);
 }
 
-function drawCity() {
-    while (visualElements.children.length) {
-        visualElements.remove(visualElements.children[0]);
-    }
-    if (comMarker) {
-        scene.remove(comMarker);
-        comMarker = null;
-    }
+function addCityElement(item) {
+    const elementConfig = Elements[item.type];
 
-    cityElements.forEach(item => {
-        const elementConfig = Elements[item.type];
+    let finalObject;
+
+    if (item.type === 'ROAD') {
+        const roadGroup = new THREE.Group();
+        roadGroup.name = "Road";
+
+        const roadBaseMaterial = new THREE.MeshStandardMaterial({ color: elementConfig.color });
+        const roadBaseGeometry = new THREE.BoxGeometry(item.width, elementConfig.size.height, item.depth);
+        const roadBaseMesh = new THREE.Mesh(roadBaseGeometry, roadBaseMaterial);
+        roadGroup.add(roadBaseMesh);
+
+        const markingMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff });
+        const markingHeight = 0.5;
+        const markingWidth = 1.5;
+        const markingLength = 15;
+        const gap = 15;
+        const cycleLength = markingLength + gap;
+        const numMarkings = Math.floor(item.depth / cycleLength);
+        const startZ = -item.depth / 2 + cycleLength / 2;
+
+        for (let i = 0; i < numMarkings; i++) {
+            const markingGeometry = new THREE.BoxGeometry(markingWidth, markingHeight, markingLength);
+            const markingMesh = new THREE.Mesh(markingGeometry, markingMaterial);
+            markingMesh.position.set(0, (elementConfig.size.height / 2) + (markingHeight / 2), startZ + i * cycleLength);
+            roadGroup.add(markingMesh);
+        }
+        finalObject = roadGroup;
+
+    } else {
         const geometry = new THREE.BoxGeometry(item.width, elementConfig.size.height, item.depth);
         const material = new THREE.MeshStandardMaterial({ color: elementConfig.color });
         const mesh = new THREE.Mesh(geometry, material);
         mesh.name = elementConfig.name;
-        mesh.position.set(item.x + item.width / 2, elementConfig.size.height / 2, item.z + item.depth / 2);
-        mesh.castShadow = true;
-        mesh.receiveShadow = true;
-        visualElements.add(mesh);
+        finalObject = mesh;
+    }
+
+    finalObject.position.set(item.x + item.width / 2, elementConfig.size.height / 2, item.z + item.depth / 2);
+
+    finalObject.traverse(child => {
+        if (child.isMesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+        }
     });
+
+    visualElements.add(finalObject);
 }
 
 function handleCanvasClick(event) {
@@ -264,12 +293,13 @@ function handleCanvasClick(event) {
         if (!elementType) return;
 
         const { width, depth } = elementType.size;
-        const intendedX = intersectPoint.x - width / 2;
-        const intendedZ = intersectPoint.z - depth / 2;
-        const snappedX = Math.round(intendedX / GRID_SIZE) * GRID_SIZE;
-        const snappedZ = Math.round(intendedZ / GRID_SIZE) * GRID_SIZE;
-        const finalX = clamp(snappedX, 0, canvas.width - width);
-        const finalZ = clamp(snappedZ, 0, canvas.height - depth);
+
+        // Snap the actual click point to the grid, then place the element's center there.
+        const snappedIntersectionX = Math.round(intersectPoint.x / GRID_SIZE) * GRID_SIZE;
+        const snappedIntersectionZ = Math.round(intersectPoint.z / GRID_SIZE) * GRID_SIZE;
+
+        const finalX = clamp(snappedIntersectionX - width / 2, 0, canvas.width - width);
+        const finalZ = clamp(snappedIntersectionZ - depth / 2, 0, canvas.height - depth);
 
         const isOverlapping = cityElements.some(item => (
             finalX < item.x + item.width && finalX + width > item.x &&
@@ -284,8 +314,9 @@ function handleCanvasClick(event) {
         }
 
         clearAnalysisMessage();
-        cityElements.push({ type: selectedElementKey, x: finalX, z: finalZ, width, depth, weight: elementType.weight });
-        drawCity();
+        const newElement = { type: selectedElementKey, x: finalX, z: finalZ, width, depth, weight: elementType.weight };
+        cityElements.push(newElement);
+        addCityElement(newElement);
     }
 }
 
@@ -294,7 +325,15 @@ function resetCity() {
     harmonyScoreDisplay.textContent = '--';
     clearAnalysisMessage();
     analysisMessage.textContent = 'Map reset. Start designing!';
-    drawCity();
+
+    // Clear all visual elements
+    while (visualElements.children.length) {
+        visualElements.remove(visualElements.children[0]);
+    }
+    if (comMarker) {
+        scene.remove(comMarker);
+        comMarker = null;
+    }
 }
 
 function calculateHarmonyScore() {
@@ -322,7 +361,6 @@ function calculateHarmonyScore() {
         clearAnalysisMessage();
         analysisMessage.classList.add('text-red-600', 'font-bold');
         analysisMessage.textContent = `🚫 Must fill at least 25% of map. Current: ${(currentFillPercentage * 100).toFixed(1)}%.`;
-        drawCity();
         return;
     }
 
@@ -360,7 +398,10 @@ function calculateHarmonyScore() {
         analysisMessage.textContent = `${fillMessage} Keep trying! CoM is far from Golden Cut.`;
     }
 
-    drawCity();
+    // Remove old marker and draw new one
+    if (comMarker) {
+        scene.remove(comMarker);
+    }
     const comGeometry = new THREE.SphereGeometry(8, 32, 32);
     const comMaterial = new THREE.MeshBasicMaterial({ color: '#facc15' });
     comMarker = new THREE.Mesh(comGeometry, comMaterial);

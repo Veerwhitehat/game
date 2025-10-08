@@ -2,9 +2,6 @@ import os
 from playwright.sync_api import sync_playwright, Page, expect
 
 def run_verification(page: Page):
-    # Capture and print console messages. The '.text' attribute is correct.
-    page.on("console", lambda msg: print(f"CONSOLE: {msg.text}"))
-
     # Get the absolute path to the HTML file
     absolute_path = os.path.abspath("Golden_Ratio_Game.html")
 
@@ -15,30 +12,26 @@ def run_verification(page: Page):
     canvas = page.locator("#gameCanvas")
     expect(canvas).to_be_visible()
 
-    # Place a building
-    print("\n--- Placing Building ---")
+    # Place a building (now grey)
     page.click("#gameCanvas", position={"x": 200, "y": 150})
 
     # Select the Park element
-    print("\n--- Placing Park ---")
     page.click("#btn-PARK")
 
     # Place a park
     page.click("#gameCanvas", position={"x": 450, "y": 150})
 
     # Select the Road element
-    print("\n--- Placing Road ---")
     page.click("#btn-ROAD")
 
-    # Place a road
+    # Place a road with lane markings
     page.click("#gameCanvas", position={"x": 300, "y": 300})
 
     # Give a moment for the 3D scene to render before taking a screenshot
     page.wait_for_timeout(1000)
 
     # Take a screenshot for visual verification
-    page.screenshot(path="jules-scratch/verification/verification_final_debug.png")
-    print("\nScreenshot 'verification_final_debug.png' created.")
+    page.screenshot(path="jules-scratch/verification/verification_optimized.png")
 
 def main():
     with sync_playwright() as p:
