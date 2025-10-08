@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Design Your Golden City</title>
+<!-- Load Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com"></script>
+<!-- Load Josefin Sans Font -->
+<link href="https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@400;700&display=swap" rel="stylesheet">
+<style>
+/* Custom CSS for the Game Canvas */
+body {
+font-family: 'Josefin Sans', sans-serif; /* Updated font to Josefin Sans */
+background-color: #f7f7f7;
+display: flex;
+justify-content: center;
+align-items: flex-start;
+min-height: 100vh;
+padding: 20px;
+}
+#gameCanvas {
+/* Changed from blue to green border */
+border: 4px solid #059669; /* Emerald 600 */
+background-color: #e5e7eb;
+box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+border-radius: 1rem;
+cursor: crosshair;
+}
+.element-button {
+transition: all 0.15s ease-in-out;
+}
+.element-button:hover {
+transform: translateY(-2px);
+box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+.element-button.active {
+/* Changed from blue ring to green ring */
+box-shadow: 0 0 0 4px #a7f3d0; /* Ring-emerald-200 */
+}
+</style>
+</head>
+<body class="bg-gray-100">
+
+<div class="flex flex-col lg:flex-row w-full max-w-7xl gap-8">
+
+<!-- Left Column: Controls and Scoreboard -->
+<div class="lg:w-1/3 w-full bg-white p-6 rounded-2xl shadow-xl space-y-6 self-start">
+<h1 class="text-3xl font-extrabold text-gray-800 mb-1">Design Your Golden City</h1>
+<p class="text-xs text-gray-500 mb-4">By Adhiraj Sharma, Rahul Sai Paladugu, and Veer Singh Pilania 9D</p>
+<p class="text-sm text-gray-600">Place elements to design your city. Your goal is to arrange the composition so its **Center of Mass (CoM)** aligns with the **Golden Ratio** ($\phi \approx 1.618$) points (approx. 38.2% and 61.8% of the width/height). **You must fill at least 25% of the map to submit a score!**</p>
+
+<!-- Score Container - Updated to Green Theme -->
+<div id="scoreContainer" class="p-4 bg-green-50 rounded-lg border border-green-200">
+<!-- Score Display will be updated to show both rounded and unrounded values -->
+<p class="text-lg font-semibold text-gray-700">Harmony Score: <span id="harmonyScore" class="text-2xl font-bold text-green-600">--</span></p>
+<p id="analysisMessage" class="text-sm text-green-700 mt-1"></p>
+</div>
+
+<!-- Element Tools -->
+<div class="space-y-4">
+<h2 class="text-xl font-bold text-gray-700">Place Elements</h2>
+<div id="elementTools" class="grid grid-cols-2 gap-3">
+<!-- Buttons will be injected here by JS -->
+</div>
+</div>
+
+<!-- Actions -->
+<div class="pt-4 border-t">
+<!-- Calculate Harmony Button changed to light blue -->
+<button onclick="calculateHarmonyScore()" class="w-full py-3 px-4 bg-blue-400 text-white font-bold rounded-xl hover:bg-blue-500 transition duration-150 transform hover:scale-[1.01] shadow-lg">
+Calculate Harmony
+</button>
+<button onclick="resetCity()" class="w-full mt-3 py-2 px-4 bg-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-300 transition duration-150">
+Reset Map
+</button>
+</div>
+</div>
+
+<!-- Right Column: Canvas Area -->
+<div class="lg:w-2/3 w-full flex justify-center items-center">
+<canvas id="gameCanvas" width="600" height="400"></canvas>
+</div>
+
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const elementTools = document.getElementById('elementTools');
+const harmonyScoreDisplay = document.getElementById('harmonyScore');
+const analysisMessage = document.getElementById('analysisMessage');
+
+// --- Configuration ---
+const PHI = 1.6180339887; // Golden Ratio
+const PHI_CONJUGATE = PHI - 1; // ~ 0.618 (The Golden Cut ratio)
+const GRID_SIZE = 20; // Grid size for precision snapping
+
+const Elements = {
+BUILDING: {
+name: "Building",
+color: "#15803d", // Green-700
+size: { width: 40, height: 60 },
+weight: 200, // Higher weight for CoM calculation
+icon: "🏢"
+},
+PARK: {
+name: "Park",
+color: "#34d399", // Emerald-400 (Lighter Green)
+size: { width: 80, height: 40 },
+weight: 150,
+icon: "🌳"
+},
+ROAD: {
+name: "Road",
+color: "#475569", // Slate-600 (Darker, earthy tone)
+size: { width: 10, height: 100 },
+weight: 80,
+icon: "🛣️"
+}
+};
+
+// --- Game State ---
+let cityElements = [];
+let selectedElementKey = 'BUILDING';
+
+// --- Utility Functions ---
+
+/**
+* Clamps a value between a minimum and maximum.
+* @param {number} num The value to clamp.
+* @param {number} min The minimum boundary.
+* @param {number} max The maximum boundary.
+* @returns {number} The clamped value.
+*/
+function clamp(num, min, max) {
+return Math.max(min, Math.min(max, num));
+}
+
+/**
+* Clears the analysis message styling, resetting it to default.
+*/
+function clearAnalysisMessage() {
+analysisMessage.textContent = '';
+analysisMessage.classList.remove('text-red-600', 'font-bold', 'text-green-700');
+analysisMessage.classList.add('text-gray-700');
+}
+
+/**
+* Creates the element selection buttons and sets up event listeners.
+*/
+function initializeTools() {
+elementTools.innerHTML = ''; // Clear existing tools
+Object.keys(Elements).forEach(key => {
+const element = Elements[key];
+const button = document.createElement('button');
+button.className = 'element-button flex items-center justify-center p-3 rounded-xl border border-gray-300 bg-white shadow-sm font-semibold text-gray-800';
+button.innerHTML = `<span class="text-xl mr-2">${element.icon}</span> ${element.name}`;
+button.onclick = () => selectElement(key);
+button.id = `btn-${key}`;
+elementTools.appendChild(button);
+});
+// Select the initial element
+selectElement(selectedElementKey);
+}
+
+/**
+* Sets the currently selected element for placement.
+* @param {string} key The key of the element in the Elements object.
+*/
+function selectElement(key) {
+selectedElementKey = key;
+// Update active button styling
+Object.keys(Elements).forEach(k => {
+const btn = document.getElementById(`btn-${k}`);
+if (btn) {
+btn.classList.remove('active', 'bg-green-100');
+if (k === key) {
+// Using a light green background for active state
+btn.classList.add('active', 'bg-green-100');
+}
+}
+});
+}
+
+/**
+* Draws the city elements on the canvas, including grid and golden cut lines.
+*/
+function drawCity() {
+// Clear canvas
+ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+// 1. Draw Golden Cut lines (Rule of Thirds-like lines, but based on phi)
+const phi_x_1 = canvas.width * PHI_CONJUGATE;
+const phi_x_2 = canvas.width * (1 - PHI_CONJUGATE);
+const phi_y_1 = canvas.height * PHI_CONJUGATE;
+const phi_y_2 = canvas.height * (1 - PHI_CONJUGATE);
+
+ctx.strokeStyle = 'rgba(255, 193, 7, 0.5)'; // Gold color, semi-transparent
+ctx.lineWidth = 1;
+ctx.setLineDash([5, 5]);
+
+// Vertical Lines
+ctx.beginPath();
+ctx.moveTo(phi_x_1, 0);
+ctx.lineTo(phi_x_1, canvas.height);
+ctx.moveTo(phi_x_2, 0);
+ctx.lineTo(phi_x_2, canvas.height);
+ctx.stroke();
+
+// Horizontal Lines
+ctx.beginPath();
+ctx.moveTo(0, phi_y_1);
+ctx.lineTo(canvas.width, phi_y_1);
+ctx.moveTo(0, phi_y_2);
+ctx.lineTo(canvas.width, phi_y_2);
+ctx.stroke();
+
+// 2. Draw Precision Grid
+ctx.strokeStyle = 'rgba(107, 114, 128, 0.2)'; // Faint Gray
+ctx.lineWidth = 0.5;
+ctx.setLineDash([]); // Solid lines for the grid
+
+// Vertical Grid Lines
+for (let x = GRID_SIZE; x < canvas.width; x += GRID_SIZE) {
+ctx.beginPath();
+ctx.moveTo(x, 0);
+ctx.lineTo(x, canvas.height);
+ctx.stroke();
+}
+
+// Horizontal Grid Lines
+for (let y = GRID_SIZE; y < canvas.height; y += GRID_SIZE) {
+ctx.beginPath();
+ctx.moveTo(0, y);
+ctx.lineTo(canvas.width, y);
+ctx.stroke();
+}
+
+// 3. Draw elements
+cityElements.forEach(item => {
+const element = Elements[item.type];
+ctx.fillStyle = element.color;
+ctx.beginPath();
+ctx.rect(item.x, item.y, item.width, item.height);
+ctx.fill();
+
+// Add icon for visual context
+ctx.font = `${Math.min(item.width, item.height) * 0.5}px Josefin Sans`; /* Using Josefin Sans for icon text */
+ctx.textAlign = 'center';
+ctx.textBaseline = 'middle';
+ctx.fillStyle = '#ffffff';
+ctx.fillText(element.icon, item.x + item.width / 2, item.y + item.height / 2);
+});
+}
+
+/**
+* Handles clicking on the canvas to place an element, snapping the element's
+* top-left corner to the nearest grid intersection and checking for overlap.
+* @param {MouseEvent} event The click event.
+*/
+function handleCanvasClick(event) {
+const rect = canvas.getBoundingClientRect();
+const clickX = event.clientX - rect.left;
+const clickY = event.clientY - rect.top;
+
+const elementType = Elements[selectedElementKey];
+if (!elementType) return;
+
+const width = elementType.size.width;
+const height = elementType.size.height;
+
+// 1. Calculate the intended top-left corner position
+const intendedElementX = clickX - width / 2;
+const intendedElementY = clickY - height / 2;
+
+// 2. Snap the intended top-left corner (x, y) to the nearest grid line.
+const snappedX = Math.round(intendedElementX / GRID_SIZE) * GRID_SIZE;
+const snappedY = Math.round(intendedElementY / GRID_SIZE) * GRID_SIZE;
+
+// 3. Ensure the snapped top-left corner stays within bounds
+const finalX = clamp(snappedX, 0, canvas.width - width);
+const finalY = clamp(snappedY, 0, canvas.height - height);
+// Collision Check
+const isOverlapping = cityElements.some(item => {
+return (
+finalX < item.x + item.width &&
+finalX + width > item.x &&
+finalY < item.y + item.height &&
+finalY + height > item.y
+);
+});
+
+if (isOverlapping) {
+analysisMessage.textContent = 'Oops! Elements cannot overlap. Try placing it somewhere else.';
+clearAnalysisMessage(); // Reset color classes
+analysisMessage.classList.add('text-red-600', 'font-bold');
+setTimeout(() => {
+// Revert to default text if no score is showing
+if (harmonyScoreDisplay.textContent === '--') {
+clearAnalysisMessage();
+}
+}, 2000);
+return;
+}
+// Clear any temporary overlap message if placement is successful
+clearAnalysisMessage();
+
+
+// Create new element object
+const newElement = {
+type: selectedElementKey,
+x: finalX,
+y: finalY,
+width: width,
+height: height,
+weight: elementType.weight // Weight for CoM calculation
+};
+
+cityElements.push(newElement);
+drawCity();
+}
+
+/**
+* Clears the city and resets the score.
+*/
+function resetCity() {
+cityElements = [];
+harmonyScoreDisplay.textContent = '--';
+clearAnalysisMessage();
+analysisMessage.classList.add('text-green-700');
+analysisMessage.textContent = 'Map reset. Start designing!';
+drawCity();
+}
+
+/**
+* Calculates the Harmony Score based on Golden Ratio alignment and area fill.
+*/
+function calculateHarmonyScore() {
+if (cityElements.length === 0) {
+harmonyScoreDisplay.textContent = '0';
+clearAnalysisMessage();
+analysisMessage.classList.add('text-red-600');
+analysisMessage.textContent = 'Please place some elements before calculating the score!';
+return;
+}
+
+// 1. Calculate Center of Mass (CoM) and Total Area
+let totalWeightedX = 0;
+let totalWeightedY = 0;
+let totalWeight = 0;
+let occupiedArea = 0; // Area of all placed elements
+
+cityElements.forEach(item => {
+// Geometric center of the element
+const elementCenterX = item.x + item.width / 2;
+const elementCenterY = item.y + item.height / 2;
+
+// Weighted sum
+totalWeightedX += elementCenterX * item.weight;
+totalWeightedY += elementCenterY * item.weight;
+totalWeight += item.weight;
+// Calculate occupied area
+occupiedArea += item.width * item.height;
+});
+
+const totalArea = canvas.width * canvas.height;
+const minFillPercentage = 0.25; // UPDATED to 25%
+const currentFillPercentage = occupiedArea / totalArea;
+
+// --- CRITICAL: Enforcement of 25% Area Requirement (Early Exit) ---
+if (currentFillPercentage < minFillPercentage) {
+harmonyScoreDisplay.innerHTML = 'N/A';
+clearAnalysisMessage();
+analysisMessage.classList.remove('text-gray-700', 'text-green-700');
+analysisMessage.classList.add('text-red-600', 'font-bold');
+analysisMessage.textContent = `🚫 Score Blocked: You must fill at least 25% of the map to calculate harmony. Current Fill: ${(currentFillPercentage * 100).toFixed(1)}%.`;
+drawCity(); // Redraw to show CoM is not calculated/displayed
+return; // EXIT HERE: Do not calculate or display any CoM score
+}
+// --- END Area Fill Requirement Check ---
+// 2. CoM and Harmony Score Calculation (Only runs if 25% is met)
+const comX = totalWeightedX / totalWeight;
+const comY = totalWeightedY / totalWeight;
+
+// Identify Golden Cut points & CoM error calculation
+const goldenCutX1 = canvas.width * PHI_CONJUGATE;
+const goldenCutX2 = canvas.width * (1 - PHI_CONJUGATE);
+const goldenCutY1 = canvas.height * PHI_CONJUGATE;
+const goldenCutY2 = canvas.height * (1 - PHI_CONJUGATE);
+
+// Calculate distance to the closest Golden Cut point on X and Y axis
+const errorX1 = Math.abs(comX - goldenCutX1);
+const errorX2 = Math.abs(comX - goldenCutX2);
+const minErrorX = Math.min(errorX1, errorX2);
+const normalizedErrorX = clamp(minErrorX / (canvas.width / 2), 0, 1);
+
+const errorY1 = Math.abs(comY - goldenCutY1);
+const errorY2 = Math.abs(comY - goldenCutY2);
+const minErrorY = Math.min(errorY1, errorY2);
+const normalizedErrorY = clamp(minErrorY / (canvas.height / 2), 0, 1);
+
+// Calculate Harmony Score based purely on CoM alignment
+const averageNormalizedError = (normalizedErrorX + normalizedErrorY) / 2;
+// Calculate both rounded and unrounded scores based on CoM
+const unroundedCoMScore = 100 * (1 - averageNormalizedError);
+let harmonyScore = Math.round(unroundedCoMScore);
+harmonyScore = clamp(harmonyScore, 0, 100);
+
+// Calculate Actual Design Ratio (For display)
+const px = comX / canvas.width;
+const py = comY / canvas.height;
+const ratioX = Math.max(px, 1 - px) / Math.min(px, 1 - px);
+const ratioY = Math.max(py, 1 - py) / Math.min(py, 1 - py);
+const averageRatio = (ratioX + ratioY) / 2;
+// 3. Update UI and Draw CoM point
+const finalScore = harmonyScore;
+harmonyScoreDisplay.innerHTML = `${finalScore} <span class="text-lg font-normal text-gray-500">(${unroundedCoMScore.toFixed(2)}%) | Ratio: ${averageRatio.toFixed(3)}</span>`;
+
+clearAnalysisMessage();
+analysisMessage.classList.add('text-green-700');
+const fillMessage = `Area requirement met (${(currentFillPercentage * 100).toFixed(1)}%).`;
+
+
+if (finalScore >= 85) {
+analysisMessage.textContent = `${fillMessage} Excellent! Your city composition is perfectly balanced, achieving an ${finalScore}% Golden Ratio alignment.`;
+} else if (finalScore >= 65) {
+analysisMessage.textContent = `${fillMessage} Good! Your composition is generally harmonious (Ratio: ${averageRatio.toFixed(3)}).`;
+} else {
+analysisMessage.classList.remove('text-green-700');
+analysisMessage.classList.add('text-red-600');
+analysisMessage.textContent = `${fillMessage} Keep trying! The Center of Mass of your design is far from the Golden Cut lines.`;
+}
+
+
+// Redraw with CoM point
+drawCity();
+ctx.fillStyle = '#facc15'; // Amber-400 (Bright Gold/Yellow contrast)
+ctx.beginPath();
+ctx.arc(comX, comY, 8, 0, Math.PI * 2);
+ctx.fill();
+
+// Draw a label for CoM
+ctx.font = '14px Josefin Sans'; /* Using Josefin Sans for CoM label */
+ctx.fillStyle = '#000000';
+ctx.fillText('CoM', comX + 12, comY - 8);
+}
+
+
+// --- Initialization ---
+
+window.onload = function() {
+canvas.addEventListener('click', handleCanvasClick);
+initializeTools();
+resetCity(); // Initial draw and message setting
+};
+</script>
+</body>
+</html>
