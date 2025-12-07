@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Space Debris Rescue Mission</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Orbitron', sans-serif;
+            background-color: #000020;
+            color: #ffffff;
+        }
+        .text-glow {
+            text-shadow: 0 0 8px #00d0ff, 0 0 12px #00d0ff;
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen">
+
+    <div class="w-full max-w-7xl mx-auto grid grid-cols-12 gap-6 p-4">
+
+        <!-- Left Column: Title, Instructions, and Scoreboard -->
+        <div class="col-span-12 lg:col-span-3 bg-gray-900 bg-opacity-50 backdrop-blur-md rounded-lg p-6 space-y-4">
+            <h1 class="text-3xl font-bold text-glow">Space Debris Rescue Mission</h1>
+            <div>
+                <h2 class="text-xl font-bold mb-2 text-glow">How to Play</h2>
+                <p class="text-sm">Click on debris to collect them for +5 points. Drag the satellite to move it, but be careful! If debris hits the satellite, you lose 20 points. Dragging debris into the green safe zone also collects it, but entering the red danger zone costs you 8 points.</p>
+            </div>
+            <div>
+                <h2 class="text-xl font-bold mb-2 text-glow">Scoreboard</h2>
+                <div id="scoreboard" class="space-y-2">
+                    <p>Total Score: <span id="totalScore" class="font-bold text-2xl text-glow">0</span></p>
+                </div>
+                <div id="result" class="mt-4 text-lg font-bold"></div>
+            </div>
+        </div>
+
+        <!-- Center Column: Game Canvas -->
+        <div class="col-span-12 lg:col-span-6 bg-gray-900 bg-opacity-50 backdrop-blur-md rounded-lg p-4">
+            <canvas id="gameCanvas" width="600" height="600" class="mx-auto"></canvas>
+        </div>
+
+        <!-- Right Column: Timer -->
+        <div class="col-span-12 lg:col-span-3 bg-gray-900 bg-opacity-50 backdrop-blur-md rounded-lg p-6 space-y-4">
+            <div>
+                <h2 class="text-xl font-bold mb-2 text-glow">Orbit Storm Timer</h2>
+                <div id="timer" class="text-6xl font-bold text-center text-glow">30</div>
+                <button id="startButton" class="w-full mt-4 bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">Start</button>
+                <button id="restartButton" class="w-full mt-4 bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded" style="display: none;">Restart</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+
+        // Scene setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, canvas.width / canvas.height, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+        renderer.setSize(canvas.width, canvas.height);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+        directionalLight.position.set(5, 5, 5);
+        scene.add(directionalLight);
+
+        camera.position.z = 5;
+
+        // Earth
+        const earthGeometry = new THREE.SphereGeometry(1, 32, 32);
+        const textureLoader = new THREE.TextureLoader();
+        const earthTexture = textureLoader.load('earth_texture.png?v=2' + Date.now());
+        const earthMaterial = new THREE.MeshStandardMaterial({ map: earthTexture, metalness: 0.1, roughness: 0.7 });
+        const earth = new THREE.Mesh(earthGeometry, earthMaterial);
+        scene.add(earth);
+
+        // Starfield
+        const starGeometry = new THREE.BufferGeometry();
+        const starVertices = [];
+        for (let i = 0; i < 10000; i++) {
+            const x = THREE.MathUtils.randFloatSpread(100);
+            const y = THREE.MathUtils.randFloatSpread(100);
+            const z = THREE.MathUtils.randFloatSpread(100);
+            starVertices.push(x, y, z);
+        }
+        starGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starVertices, 3));
+        const starMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 0.1 });
+        const stars = new THREE.Points(starGeometry, starMaterial);
+        scene.add(stars);
+
+        // Orbit Rings
+        const orbitRadii = [1.5, 2, 2.5];
+        const ringSegments = 100;
+        const tubeRadius = 0.05;
+
+        orbitRadii.forEach(radius => {
+            const ringGeometry = new THREE.TorusGeometry(radius, tubeRadius, 16, ringSegments);
+            const ringMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 });
+            const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+            ring.rotation.x = Math.PI / 2;
+            scene.add(ring);
+        });
+
+        // Safe Zone
+        const safeZoneGeometry = new THREE.TorusGeometry(2, tubeRadius, 16, ringSegments, Math.PI);
+        const safeZoneMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+        const safeZone = new THREE.Mesh(safeZoneGeometry, safeZoneMaterial);
+        safeZone.rotation.x = Math.PI / 2;
+        scene.add(safeZone);
+
+        // Danger Zone
+        const dangerZoneGeometry = new THREE.TorusGeometry(2, tubeRadius, 16, ringSegments, Math.PI);
+        const dangerZoneMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+        const dangerZone = new THREE.Mesh(dangerZoneGeometry, dangerZoneMaterial);
+        dangerZone.rotation.x = Math.PI / 2;
+        dangerZone.rotation.z = Math.PI;
+        scene.add(dangerZone);
+
+        // Debris
+        const debrisGeometries = [
+            new THREE.IcosahedronGeometry(0.1, 0),
+            new THREE.TorusGeometry(0.1, 0.02, 8, 24),
+            new THREE.CylinderGeometry(0.05, 0.1, 0.2, 8)
+        ];
+
+        const debrisMaterial = new THREE.MeshStandardMaterial({
+            color: 0x808080,
+            metalness: 0.8,
+            roughness: 0.5
+        });
+
+        const debris = [];
+        for (let i = 0; i < 10; i++) {
+            const geometry = debrisGeometries[Math.floor(Math.random() * debrisGeometries.length)];
+            const mesh = new THREE.Mesh(geometry, debrisMaterial);
+            const radius = 1.5 + Math.random() * 1.5;
+            const angle = Math.random() * Math.PI * 2;
+            mesh.position.set(
+                Math.cos(angle) * radius,
+                (Math.random() - 0.5) * 0.5,
+                Math.sin(angle) * radius
+            );
+            mesh.rotation.set(
+                Math.random() * Math.PI * 2,
+                Math.random() * Math.PI * 2,
+                Math.random() * Math.PI * 2
+            );
+            mesh.userData.orbitSpeed = (Math.random() - 0.5) * 0.01 + 0.005;
+            mesh.userData.orbitAxis = new THREE.Vector3(
+                Math.random() - 0.5,
+                Math.random() - 0.5,
+                Math.random() - 0.5
+            ).normalize();
+            debris.push(mesh);
+            scene.add(mesh);
+        }
+
+        // Satellite
+        const satelliteTexture = textureLoader.load('satellite_texture.png');
+        const satelliteMaterial = new THREE.MeshBasicMaterial({
+            map: satelliteTexture,
+            transparent: true
+        });
+        const satelliteGeometry = new THREE.PlaneGeometry(0.5, 0.5);
+        const satellite1 = new THREE.Mesh(satelliteGeometry, satelliteMaterial);
+        satellite1.name = 'satellite';
+        satellite1.position.set(-3.5, 0, 0);
+        scene.add(satellite1);
+
+        const draggableObjects = [...debris, satellite1];
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        let selectedObject = null;
+
+        function onMouseMove(event) {
+            if (selectedObject) {
+                const rect = renderer.domElement.getBoundingClientRect();
+                mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+                mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+                raycaster.setFromCamera(mouse, camera);
+                const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+                const intersects = new THREE.Vector3();
+                raycaster.ray.intersectPlane(plane, intersects);
+                selectedObject.position.copy(intersects);
+            }
+        }
+
+        function onMouseDown(event) {
+            const rect = renderer.domElement.getBoundingClientRect();
+            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(draggableObjects);
+
+            if (intersects.length > 0) {
+                const clickedObject = intersects[0].object;
+
+                // If the clicked object is a debris
+                if (debris.includes(clickedObject)) {
+                    addScore(5);
+                    scene.remove(clickedObject);
+                    const index = debris.indexOf(clickedObject);
+                    if (index > -1) {
+                        debris.splice(index, 1);
+                    }
+                } else {
+                    // It's the satellite or something else
+                    selectedObject = clickedObject;
+                }
+            }
+        }
+
+        function onMouseUp(event) {
+            selectedObject = null;
+        }
+
+        function checkCollisions() {
+            const satelliteBBox = new THREE.Box3().setFromObject(satellite1);
+
+            for (let i = debris.length - 1; i >= 0; i--) {
+                const d = debris[i];
+                const debrisBBox = new THREE.Box3().setFromObject(d);
+
+                // Debris-Satellite collision
+                if (satelliteBBox.intersectsBox(debrisBBox)) {
+                    addScore(-20); // Satellite destroyed
+                    scene.remove(satellite1);
+                    // maybe show an explosion?
+                }
+
+                // Debris-Safe Zone
+                const angle = Math.atan2(d.position.z, d.position.x);
+                const radius = Math.sqrt(d.position.x * d.position.x + d.position.z * d.position.z);
+                if (radius > 1.9 && radius < 2.1) {
+                    if (angle > -Math.PI / 2 && angle < Math.PI / 2) {
+                        addScore(5); // Debris collected
+                        scene.remove(d);
+                        debris.splice(i, 1);
+                    }
+                }
+
+                // Debris-Danger Zone
+                if (radius > 1.9 && radius < 2.1) {
+                    if (angle < -Math.PI / 2 || angle > Math.PI / 2) {
+                        addScore(-8); // Debris enters danger zone
+                        scene.remove(d);
+                        debris.splice(i, 1);
+                    }
+                }
+            }
+        }
+
+        renderer.domElement.addEventListener('mousedown', onMouseDown);
+        renderer.domElement.addEventListener('mousemove', onMouseMove);
+        renderer.domElement.addEventListener('mouseup', onMouseUp);
+
+
+        function animate() {
+            requestAnimationFrame(animate);
+            earth.rotation.y += 0.001;
+            // satellite1.lookAt(camera.position);
+
+            // Debris animation
+            debris.forEach(d => {
+                if (d !== selectedObject) {
+                    d.position.applyAxisAngle(d.userData.orbitAxis, d.userData.orbitSpeed);
+                    d.rotation.y += 0.01;
+                    d.rotation.x += 0.01;
+                }
+            });
+
+            checkCollisions();
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        let score = 0;
+        const scoreDisplay = document.getElementById('totalScore');
+        const resultDisplay = document.getElementById('result');
+
+        function addScore(amount) {
+            score += amount;
+            scoreDisplay.textContent = score;
+        }
+
+        const timerDisplay = document.getElementById('timer');
+        let timerInterval;
+        let timeLeft = 30;
+
+        const startButton = document.getElementById('startButton');
+        const restartButton = document.getElementById('restartButton');
+
+        function initGame() {
+            // Reset everything
+            score = 0;
+            timeLeft = 30;
+            scoreDisplay.textContent = score;
+            timerDisplay.textContent = timeLeft;
+            resultDisplay.textContent = '';
+
+            // Remove old debris
+            debris.forEach(d => scene.remove(d));
+            debris.length = 0;
+
+            // Add new debris
+            for (let i = 0; i < 10; i++) {
+                const geometry = debrisGeometries[Math.floor(Math.random() * debrisGeometries.length)];
+                const mesh = new THREE.Mesh(geometry, debrisMaterial);
+                const radius = 1.5 + Math.random() * 1.5;
+                const angle = Math.random() * Math.PI * 2;
+                mesh.position.set(
+                    Math.cos(angle) * radius,
+                    (Math.random() - 0.5) * 0.5,
+                    Math.sin(angle) * radius
+                );
+                mesh.rotation.set(
+                    Math.random() * Math.PI * 2,
+                    Math.random() * Math.PI * 2,
+                    Math.random() * Math.PI * 2
+                );
+                mesh.userData.orbitSpeed = (Math.random() - 0.5) * 0.01 + 0.005;
+                mesh.userData.orbitAxis = new THREE.Vector3(
+                    Math.random() - 0.5,
+                    Math.random() - 0.5,
+                    Math.random() - 0.5
+                ).normalize();
+                debris.push(mesh);
+                scene.add(mesh);
+            }
+
+            // Reset satellite if it was destroyed
+            if (!scene.getObjectByName('satellite')) {
+                scene.add(satellite1);
+            }
+            satellite1.position.set(-2, 0, 0);
+
+            // Hide restart button, show start button if it was hidden
+            startButton.style.display = 'none';
+            restartButton.style.display = 'none';
+
+            // Start the timer
+            timerInterval = setInterval(() => {
+                timeLeft--;
+                timerDisplay.textContent = timeLeft;
+                if (timeLeft <= 0) {
+                    clearInterval(timerInterval);
+                    timerDisplay.textContent = "Time's up!";
+                    endGame();
+                }
+            }, 1000);
+        }
+
+        function endGame() {
+            let title = '';
+            if (score >= 60) {
+                title = 'Orbit Heroes';
+            } else if (score >= 30) {
+                title = 'Space Rangers';
+            } else {
+                title = 'Kessler Chaos';
+            }
+            resultDisplay.textContent = `Final Score: ${score} - ${title}`;
+            restartButton.style.display = 'block';
+        }
+
+
+        startButton.addEventListener('click', () => {
+            startButton.style.display = 'none';
+            initGame();
+        });
+
+        restartButton.addEventListener('click', initGame);
+    </script>
+
+</body>
+</html>
