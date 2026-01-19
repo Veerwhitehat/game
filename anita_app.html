@@ -6,6 +6,7 @@
     <title>Anita Attendance & Salary Tracker</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
     <style>
@@ -88,7 +89,11 @@
         // State Management
         const DEFAULT_SETTINGS = {
             monthlySalary: 19000,
-            shiftTimes: ["08:00", "13:00", "18:00"],
+            shifts: [
+                { start: "08:40", penalty: "09:30", end: "10:00" },
+                { start: "13:15", penalty: "13:45", end: "14:15" },
+                { start: "18:00", penalty: "18:30", end: "19:00" }
+            ],
             adminPassword: "4248",
             maidPassword: "anita",
             currency: "₹",
@@ -133,6 +138,29 @@
         // Initial load
         loadState();
 
+        // Face API Helpers
+        let modelsLoaded = false;
+        async function loadFaceModels() {
+            if (modelsLoaded) return;
+            const MODEL_URL = 'https://justadudewhohacks.github.io/face-api.js/models';
+            try {
+                await Promise.all([
+                    faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+                    faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL)
+                ]);
+                modelsLoaded = true;
+                console.log("Face models loaded");
+            } catch (err) {
+                console.error("Failed to load face models", err);
+            }
+        }
+
+        async function detectFace(videoElement) {
+            if (!modelsLoaded) await loadFaceModels();
+            const detections = await faceapi.detectSingleFace(videoElement, new faceapi.TinyFaceDetectorOptions());
+            return detections;
+        }
+
         // Constants for logic
         const SHIFT_WINDOW_MINS = 30;
 
@@ -159,7 +187,7 @@
             const year = now.getFullYear();
             const month = now.getMonth();
             const daysInMonth = getDaysInMonth(year, month);
-            const totalShiftsInMonth = daysInMonth * state.settings.shiftTimes.length;
+            const totalShiftsInMonth = daysInMonth * state.settings.shifts.length;
             const shiftValue = state.settings.monthlySalary / totalShiftsInMonth;
             const lastPayout = state.lastPayoutDate ? new Date(state.lastPayoutDate) : new Date(year, month, 1);
 
@@ -179,11 +207,11 @@
                 // If the day is in the future, don't count misses yet
                 if (date > now && d > now.getDate()) continue;
 
-                for (let i = 0; i < state.settings.shiftTimes.length; i++) {
-                    const shiftStartStr = state.settings.shiftTimes[i];
-                    const shiftStartMins = getTimeInMinutes(shiftStartStr);
-                    const shiftTime = new Date(year, month, d);
-                    shiftTime.setHours(Math.floor(shiftStartMins / 60), shiftStartMins % 60, 0, 0);
+                for (let i = 0; i < state.settings.shifts.length; i++) {
+                    const shiftCfg = state.settings.shifts[i];
+                    const shiftEndMins = getTimeInMinutes(shiftCfg.end);
+                    const shiftEndTime = new Date(year, month, d);
+                    shiftEndTime.setHours(Math.floor(shiftEndMins / 60), shiftEndMins % 60, 0, 0);
 
                     const record = dayAttendance[`shift${i}`];
 
@@ -195,8 +223,8 @@
                             }
                         }
                     } else {
-                        const windowEnd = new Date(shiftTime.getTime() + SHIFT_WINDOW_MINS * 60000);
-                        if (now > windowEnd && windowEnd > lastPayout) {
+                        // If current time is past shift end time, it's missed
+                        if (now > shiftEndTime && shiftEndTime > lastPayout) {
                             missedShifts++;
                             totalMissedValue += shiftValue;
                         }
@@ -225,12 +253,42 @@
 
         let currentAuthCallback = null;
 
+        let authDetectionInterval = null;
         function showFaceID(callback) {
             currentAuthCallback = callback;
             document.getElementById('faceid-modal').classList.remove('hidden');
-            document.getElementById('faceid-msg').textContent = "Anita, please look at the camera";
-            startCamera('auth-video');
+            document.getElementById('faceid-msg').textContent = "Scanning face...";
+            document.getElementById('faceid-msg').className = "text-gray-600 font-medium";
+            startCamera('auth-video').then(() => {
+                startAuthDetection();
+            });
             lucide.createIcons();
+        }
+
+        async function startAuthDetection() {
+            const video = document.getElementById('auth-video');
+            const msg = document.getElementById('faceid-msg');
+            let detectionCount = 0;
+
+            authDetectionInterval = setInterval(async () => {
+                if (!video || video.paused || video.ended) return;
+                const detection = await detectFace(video);
+
+                if (detection) {
+                    detectionCount++;
+                    msg.textContent = "VERIFYING... " + (".".repeat(detectionCount));
+                    msg.className = "text-green-600 font-bold";
+
+                    if (detectionCount >= 3) {
+                        clearInterval(authDetectionInterval);
+                        simulateFaceID(true);
+                    }
+                } else {
+                    detectionCount = 0;
+                    msg.textContent = "Anita, please look at the camera";
+                    msg.className = "text-gray-600 font-medium";
+                }
+            }, 600);
         }
 
         function simulateFaceID(success) {
@@ -255,6 +313,10 @@
         function closeFaceID() {
             document.getElementById('faceid-modal').classList.add('hidden');
             document.getElementById('faceid-msg').classList.remove('text-green-600', 'text-red-600');
+            if (authDetectionInterval) {
+                clearInterval(authDetectionInterval);
+                authDetectionInterval = null;
+            }
             stopCamera();
         }
 
@@ -326,16 +388,21 @@
 
                     <div class="relative w-64 h-64 mx-auto mb-10 overflow-hidden rounded-[3rem] border-4 border-white shadow-2xl bg-black">
                         <video id="enroll-video" autoplay playsinline class="w-full h-full object-cover"></video>
-                        <div class="absolute inset-0 border-[20px] border-blue-600/30 rounded-[3rem] pointer-events-none"></div>
+                        <div id="enroll-scan-overlay" class="absolute inset-0 border-[20px] border-blue-600/30 rounded-[3rem] pointer-events-none"></div>
+                        <div id="enroll-face-marker" class="absolute hidden border-2 border-green-500 rounded-full pointer-events-none"></div>
                     </div>
 
-                    <button onclick="startEnrollment()" id="enroll-btn" class="bg-white text-blue-600 w-full py-6 rounded-3xl text-2xl font-bold shadow-xl active:scale-95 transition-transform">
+                    <p id="enroll-status" class="mb-6 font-bold text-yellow-300">Loading face detection...</p>
+
+                    <button onclick="startEnrollment()" id="enroll-btn" disabled class="bg-white/50 text-blue-600 w-full py-6 rounded-3xl text-2xl font-bold shadow-xl cursor-not-allowed">
                         REGISTER MY FACE
                     </button>
-                    <p class="mt-6 text-sm opacity-60">This will only take a second</p>
+                    <p class="mt-6 text-sm opacity-60">Please look directly at the camera</p>
                 </div>
             `;
-            startCamera('enroll-video');
+            startCamera('enroll-video').then(() => {
+                startDetectionLoop('enroll-video', 'enroll-status', 'enroll-btn');
+            });
         }
 
         async function startCamera(videoId) {
@@ -366,10 +433,53 @@
             }
         }
 
+        let detectionInterval = null;
+        async function startDetectionLoop(videoId, statusId, btnId) {
+            const video = document.getElementById(videoId);
+            const status = document.getElementById(statusId);
+            const btn = document.getElementById(btnId);
+
+            await loadFaceModels();
+            if (status) status.textContent = "Adjusting camera...";
+
+            detectionInterval = setInterval(async () => {
+                if (!video || video.paused || video.ended) return;
+
+                const detection = await detectFace(video);
+                if (detection) {
+                    if (status) {
+                        status.textContent = "FACE DETECTED ✅";
+                        status.className = "mb-6 font-bold text-green-400";
+                    }
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.className = "bg-white text-blue-600 w-full py-6 rounded-3xl text-2xl font-bold shadow-xl active:scale-95 transition-transform";
+                    }
+                } else {
+                    if (status) {
+                        status.textContent = "LOOK AT CAMERA ❌";
+                        status.className = "mb-6 font-bold text-yellow-300";
+                    }
+                    if (btn) {
+                        btn.disabled = true;
+                        btn.className = "bg-white/50 text-blue-600 w-full py-6 rounded-3xl text-2xl font-bold shadow-xl cursor-not-allowed";
+                    }
+                }
+            }, 500);
+        }
+
+        function stopDetection() {
+            if (detectionInterval) {
+                clearInterval(detectionInterval);
+                detectionInterval = null;
+            }
+        }
+
         function startEnrollment() {
             const btn = document.getElementById('enroll-btn');
             btn.innerHTML = '<span class="animate-pulse">Capturing...</span>';
             btn.disabled = true;
+            stopDetection();
 
             setTimeout(() => {
                 state.faceEnrolled = true;
@@ -383,28 +493,43 @@
             const shiftInfo = getCurrentShiftInfo();
 
             let actionButtonHtml = '';
-            if (shiftInfo) {
+            if (shiftInfo && shiftInfo.active) {
                 let statusColor = 'bg-green-500';
                 let statusText = 'On-Time';
-                if (shiftInfo.status === 'early') { statusColor = 'bg-blue-500'; statusText = 'Early Arrival'; }
                 if (shiftInfo.status === 'late') { statusColor = 'bg-yellow-500'; statusText = 'Late Arrival'; }
 
                 actionButtonHtml = `
                     <div class="p-6">
-                        <button onclick="showFaceID(logAttendance)" class="${statusColor} w-full text-white rounded-3xl p-8 shadow-xl flex flex-col items-center justify-center space-y-4 transform active:scale-95 transition-transform">
-                            <i data-lucide="fingerprint" class="w-16 h-16"></i>
-                            <span class="text-3xl font-bold uppercase tracking-wide">I Am Here</span>
-                            <span class="text-lg opacity-90">${statusText} (${shiftInfo.startTime})</span>
+                        <button onclick="showFaceID(logAttendance)" class="${statusColor} w-full text-white rounded-[2.5rem] p-10 shadow-2xl flex flex-col items-center justify-center space-y-4 transform active:scale-95 transition-all">
+                            <div class="bg-white/20 p-4 rounded-full">
+                                <i data-lucide="fingerprint" class="w-16 h-16"></i>
+                            </div>
+                            <span class="text-4xl font-extrabold uppercase tracking-tighter">I AM HERE</span>
+                            <span class="text-lg font-bold opacity-90 bg-black/20 px-4 py-1 rounded-full underline decoration-2">${statusText} (${shiftInfo.startTime})</span>
                         </button>
+                    </div>
+                `;
+            } else if (shiftInfo && !shiftInfo.active) {
+                actionButtonHtml = `
+                    <div class="p-6">
+                        <div class="bg-gray-100 dark:bg-gray-800 w-full rounded-[2.5rem] p-10 border-4 border-dashed border-gray-200 dark:border-gray-700 flex flex-col items-center justify-center space-y-4">
+                            <i data-lucide="lock" class="w-12 h-12 text-gray-400"></i>
+                            <div class="text-center">
+                                <span class="block text-2xl font-bold text-gray-500">Next Shift Locked</span>
+                                <span class="text-gray-400 font-medium">Starting at ${shiftInfo.startTime}</span>
+                            </div>
+                        </div>
                     </div>
                 `;
             } else {
                 actionButtonHtml = `
                     <div class="p-6">
-                        <div class="bg-gray-100 w-full rounded-3xl p-8 border-2 border-dashed border-gray-300 flex flex-col items-center justify-center space-y-2">
-                            <i data-lucide="clock" class="w-12 h-12 text-gray-400"></i>
-                            <span class="text-xl font-semibold text-gray-500">No Active Shift</span>
-                            <span class="text-sm text-gray-400 text-center">Next shift will appear here when it's time</span>
+                        <div class="bg-gray-100 dark:bg-gray-800 w-full rounded-[2.5rem] p-10 border-4 border-dashed border-gray-200 dark:border-gray-700 flex flex-col items-center justify-center space-y-4">
+                            <i data-lucide="calendar-check" class="w-12 h-12 text-gray-400"></i>
+                            <div class="text-center">
+                                <span class="block text-2xl font-bold text-gray-500">Done for Today</span>
+                                <span class="text-gray-400 font-medium">All shifts completed</span>
+                            </div>
                         </div>
                     </div>
                 `;
@@ -487,7 +612,7 @@
                         <div class="flex gap-0.5 mt-1">
                 `;
 
-                for (let i = 0; i < state.settings.shiftTimes.length; i++) {
+                for (let i = 0; i < state.settings.shifts.length; i++) {
                     const record = dayAttendance[`shift${i}`];
                     let icon = 'circle';
                     let color = 'text-gray-200';
@@ -502,13 +627,12 @@
                         }
                     } else {
                         // Check if missed
-                        const shiftStartStr = state.settings.shiftTimes[i];
-                        const shiftStartMins = getTimeInMinutes(shiftStartStr);
-                        const shiftTime = new Date(year, month, d);
-                        shiftTime.setHours(Math.floor(shiftStartMins / 60), shiftStartMins % 60, 0, 0);
-                        const windowEnd = new Date(shiftTime.getTime() + SHIFT_WINDOW_MINS * 60000);
+                        const shiftCfg = state.settings.shifts[i];
+                        const endMins = getTimeInMinutes(shiftCfg.end);
+                        const shiftEndTime = new Date(year, month, d);
+                        shiftEndTime.setHours(Math.floor(endMins / 60), endMins % 60, 0, 0);
 
-                        if (now > windowEnd) {
+                        if (now > shiftEndTime) {
                             icon = 'x-circle';
                             color = 'text-red-500';
                         }
@@ -566,10 +690,14 @@
                                 </div>
 
                                 <div>
-                                    <label class="text-xs font-bold text-gray-400 uppercase">Shifts</label>
-                                    <div class="grid grid-cols-3 gap-2">
-                                        ${state.settings.shiftTimes.map((t, i) => `
-                                            <input type="time" id="shift-${i}" value="${t}" onchange="updateShift(${i}, this.value)" class="border border-gray-200 rounded-xl p-2 text-sm">
+                                    <label class="text-xs font-bold text-gray-400 uppercase">Shifts (Start / Penalty / End)</label>
+                                    <div class="space-y-2 mt-1">
+                                        ${state.settings.shifts.map((s, i) => `
+                                            <div class="grid grid-cols-3 gap-2">
+                                                <input type="time" value="${s.start}" onchange="updateShift(${i}, 'start', this.value)" class="border border-gray-200 rounded-xl p-2 text-xs">
+                                                <input type="time" value="${s.penalty}" onchange="updateShift(${i}, 'penalty', this.value)" class="border border-gray-200 rounded-xl p-2 text-xs">
+                                                <input type="time" value="${s.end}" onchange="updateShift(${i}, 'end', this.value)" class="border border-gray-200 rounded-xl p-2 text-xs">
+                                            </div>
                                         `).join('')}
                                     </div>
                                 </div>
@@ -654,11 +782,11 @@
                                 return `<td class="px-6 py-4" title="${rec.time}">${status} <span class="text-[10px] text-gray-400">${rec.time}</span></td>`;
                             } else {
                                 // Check if missed
-                                const shiftStartStr = state.settings.shiftTimes[i];
-                                const shiftStartMins = getTimeInMinutes(shiftStartStr);
-                                const shiftTime = new Date(year, month, d);
-                                shiftTime.setHours(Math.floor(shiftStartMins / 60), shiftStartMins % 60, 0, 0);
-                                if (now > shiftTime) return `<td class="px-6 py-4">❌</td>`;
+                                const shiftCfg = state.settings.shifts[i];
+                                const endMins = getTimeInMinutes(shiftCfg.end);
+                                const shiftEndTime = new Date(year, month, d);
+                                shiftEndTime.setHours(Math.floor(endMins / 60), endMins % 60, 0, 0);
+                                if (now > shiftEndTime) return `<td class="px-6 py-4">❌</td>`;
                                 return `<td class="px-6 py-4 text-gray-200">○</td>`;
                             }
                         }).join('')}
@@ -680,8 +808,8 @@
             updateSetting('darkMode', !state.settings.darkMode);
         }
 
-        function updateShift(index, value) {
-            state.settings.shiftTimes[index] = value;
+        function updateShift(index, field, value) {
+            state.settings.shifts[index][field] = value;
             saveState();
             render();
         }
@@ -711,16 +839,23 @@
         }
 
         function checkReminders() {
-            const info = getCurrentShiftInfo();
-            if (info && info.status === 'on-time' && info.diff < 15) {
-                // Within 15 mins of shift start
-                if (!window.lastReminder || window.lastReminder !== info.index) {
-                    if ("Notification" in window && Notification.permission === "granted") {
-                        new Notification("Shift Starting Soon", { body: `Anita, your ${info.startTime} shift is starting!` });
-                    } else {
-                        console.log("Reminder: Shift starting soon!");
+            const nowMins = getNowInMinutes();
+            const dateStr = getCurrentDateStr();
+            const todayAttendance = state.attendance[dateStr] || {};
+
+            for (let i = 0; i < state.settings.shifts.length; i++) {
+                if (todayAttendance[`shift${i}`]) continue;
+                const shiftCfg = state.settings.shifts[i];
+                const startMins = getTimeInMinutes(shiftCfg.start);
+
+                // Within 10 mins BEFORE shift start
+                if (nowMins >= startMins - 10 && nowMins < startMins) {
+                    if (!window.lastReminder || window.lastReminder !== i) {
+                        if ("Notification" in window && Notification.permission === "granted") {
+                            new Notification("Shift Starting Soon", { body: `Anita, your ${shiftCfg.start} shift starts in 10 minutes!` });
+                        }
+                        window.lastReminder = i;
                     }
-                    window.lastReminder = info.index;
                 }
             }
         }
@@ -754,11 +889,11 @@
                     const rec = dayAttendance[`shift${i}`];
                     if (rec) row.push(`${rec.status} (${rec.time})`);
                     else {
-                        const shiftStartStr = state.settings.shiftTimes[i];
-                        const shiftStartMins = getTimeInMinutes(shiftStartStr);
-                        const shiftTime = new Date(year, month, d);
-                        shiftTime.setHours(Math.floor(shiftStartMins / 60), shiftStartMins % 60, 0, 0);
-                        if (now > shiftTime) row.push('MISSED');
+                        const shiftCfg = state.settings.shifts[i];
+                        const endMins = getTimeInMinutes(shiftCfg.end);
+                        const shiftEndTime = new Date(year, month, d);
+                        shiftEndTime.setHours(Math.floor(endMins / 60), endMins % 60, 0, 0);
+                        if (now > shiftEndTime) row.push('MISSED');
                         else row.push('-');
                     }
                 }
@@ -793,11 +928,11 @@
                         row += `,${rec.status},${rec.time}`;
                     } else {
                         // Check if missed
-                        const shiftStartStr = state.settings.shiftTimes[i];
-                        const shiftStartMins = getTimeInMinutes(shiftStartStr);
-                        const shiftTime = new Date(year, month, d);
-                        shiftTime.setHours(Math.floor(shiftStartMins / 60), shiftStartMins % 60, 0, 0);
-                        if (now > shiftTime) row += `,MISSED,-`;
+                        const shiftCfg = state.settings.shifts[i];
+                        const endMins = getTimeInMinutes(shiftCfg.end);
+                        const shiftEndTime = new Date(year, month, d);
+                        shiftEndTime.setHours(Math.floor(endMins / 60), endMins % 60, 0, 0);
+                        if (now > shiftEndTime) row += `,MISSED,-`;
                         else row += `,-,-`;
                     }
                 }
@@ -895,7 +1030,7 @@
 
         function logAttendance(authMethod = 'faceid') {
             const info = getCurrentShiftInfo();
-            if (!info) {
+            if (!info || !info.active) {
                 alert("No shift available to log right now.");
                 return;
             }
@@ -914,56 +1049,59 @@
 
             state.attendance[dateStr][`shift${info.index}`] = record;
 
-            if (info.status === 'early') {
+            if (info.isEarly) {
                 state.credits += 1;
             }
 
             saveState();
-            render(); // We'll implement render later
+            render();
         }
 
         function getCurrentShiftInfo() {
             const nowMins = getNowInMinutes();
             const dateStr = getCurrentDateStr();
             const todayAttendance = state.attendance[dateStr] || {};
+            let nextShift = null;
 
-            // Find the closest shift that hasn't been logged today
-            let closestShift = null;
-            let minDiff = Infinity;
+            for (let i = 0; i < state.settings.shifts.length; i++) {
+                const shiftCfg = state.settings.shifts[i];
+                const startMins = getTimeInMinutes(shiftCfg.start);
+                const penaltyMins = getTimeInMinutes(shiftCfg.penalty);
+                const endMins = getTimeInMinutes(shiftCfg.end);
 
-            for (let i = 0; i < state.settings.shiftTimes.length; i++) {
                 if (todayAttendance[`shift${i}`]) continue;
 
-                const shiftStartStr = state.settings.shiftTimes[i];
-                const shiftStartMins = getTimeInMinutes(shiftStartStr);
-                const diff = Math.abs(nowMins - shiftStartMins);
+                // Entry starts up to 30 mins early
+                const earlyMins = startMins - 30;
+                if (nowMins >= earlyMins && nowMins <= endMins) {
+                    let status = 'on-time';
+                    let isEarly = nowMins < startMins;
+                    if (nowMins > penaltyMins) {
+                        status = 'late';
+                    }
 
-                if (diff < minDiff) {
-                    minDiff = diff;
-                    closestShift = {
+                    return {
+                        active: true,
                         index: i,
-                        startTime: shiftStartStr,
-                        shiftStartMins: shiftStartMins,
-                        diff: diff
+                        startTime: shiftCfg.start,
+                        endTime: shiftCfg.end,
+                        status: status,
+                        isEarly: isEarly,
+                        nowMins: nowMins
+                    };
+                }
+
+                if (nowMins < startMins && !nextShift) {
+                    nextShift = {
+                        active: false,
+                        index: i,
+                        startTime: shiftCfg.start,
+                        endMins: endMins
                     };
                 }
             }
 
-            if (!closestShift) return null;
-
-            // Determine status
-            let status = 'on-time';
-            if (nowMins <= closestShift.shiftStartMins - SHIFT_WINDOW_MINS) {
-                status = 'early';
-            } else if (nowMins > closestShift.shiftStartMins + SHIFT_WINDOW_MINS) {
-                status = 'late';
-            }
-
-            return {
-                ...closestShift,
-                status: status,
-                nowMins: nowMins
-            };
+            return nextShift;
         }
 
         // Initial check for Lucide icons
