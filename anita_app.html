@@ -146,7 +146,8 @@
             try {
                 await Promise.all([
                     faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-                    faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL)
+                    faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+                    faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
                 ]);
                 modelsLoaded = true;
                 console.log("Face models loaded");
@@ -157,8 +158,9 @@
 
         async function detectFace(videoElement) {
             if (!modelsLoaded) await loadFaceModels();
-            const detections = await faceapi.detectSingleFace(videoElement, new faceapi.TinyFaceDetectorOptions());
-            return detections;
+            return await faceapi.detectSingleFace(videoElement, new faceapi.TinyFaceDetectorOptions())
+                .withFaceLandmarks()
+                .withFaceDescriptor();
         }
 
         // Constants for logic
@@ -237,7 +239,7 @@
             const actuallyCanceled = Math.min(availableCredits, potentialCancellations);
 
             const netLatePenalties = latePenalties - (actuallyCanceled * 50);
-            const currentSalary = earnings - netLatePenalties;
+            const currentSalary = state.settings.monthlySalary - totalMissedValue - netLatePenalties;
 
             return {
                 currentSalary: Math.max(0, currentSalary),
@@ -259,6 +261,12 @@
             document.getElementById('faceid-modal').classList.remove('hidden');
             document.getElementById('faceid-msg').textContent = "Scanning face...";
             document.getElementById('faceid-msg').className = "text-gray-600 font-medium";
+
+            // Hide simulation buttons in production
+            document.getElementById('faceid-actions').innerHTML = `
+                <button onclick="closeFaceID()" class="text-gray-400 py-2 text-sm font-bold uppercase tracking-wider">Cancel</button>
+            `;
+
             startCamera('auth-video').then(() => {
                 startAuthDetection();
             });
@@ -268,46 +276,47 @@
         async function startAuthDetection() {
             const video = document.getElementById('auth-video');
             const msg = document.getElementById('faceid-msg');
-            let detectionCount = 0;
+            let matchCount = 0;
 
             authDetectionInterval = setInterval(async () => {
                 if (!video || video.paused || video.ended) return;
-                const detection = await detectFace(video);
+                const result = await detectFace(video);
 
-                if (detection) {
-                    detectionCount++;
-                    msg.textContent = "VERIFYING... " + (".".repeat(detectionCount));
-                    msg.className = "text-green-600 font-bold";
+                if (result) {
+                    // Compare with stored descriptor
+                    const dist = faceapi.euclideanDistance(result.descriptor, new Float32Array(state.faceDescriptor));
+                    console.log("Face distance:", dist);
 
-                    if (detectionCount >= 3) {
-                        clearInterval(authDetectionInterval);
-                        simulateFaceID(true);
+                    if (dist < 0.6) { // 0.6 is standard threshold
+                        matchCount++;
+                        msg.textContent = "VERIFYING IDENTITY... " + (".".repeat(matchCount));
+                        msg.className = "text-green-600 font-bold";
+
+                        if (matchCount >= 3) {
+                            clearInterval(authDetectionInterval);
+                            onFaceMatchSuccess();
+                        }
+                    } else {
+                        matchCount = 0;
+                        msg.textContent = "Face does not match!";
+                        msg.className = "text-red-500 font-bold";
                     }
                 } else {
-                    detectionCount = 0;
+                    matchCount = 0;
                     msg.textContent = "Anita, please look at the camera";
                     msg.className = "text-gray-600 font-medium";
                 }
             }, 600);
         }
 
-        function simulateFaceID(success) {
+        function onFaceMatchSuccess() {
             const msg = document.getElementById('faceid-msg');
-            if (success) {
-                msg.textContent = "Face Recognized!";
-                msg.classList.add('text-green-600');
-                setTimeout(() => {
-                    closeFaceID();
-                    if (currentAuthCallback) currentAuthCallback('faceid');
-                }, 1000);
-            } else {
-                msg.textContent = "Face ID failed. Enter password";
-                msg.classList.add('text-red-600');
-                setTimeout(() => {
-                    closeFaceID();
-                    showPasswordModal();
-                }, 1000);
-            }
+            msg.textContent = "Identity Confirmed ✅";
+            msg.className = "text-green-600 font-bold text-xl";
+            setTimeout(() => {
+                closeFaceID();
+                if (currentAuthCallback) currentAuthCallback('faceid');
+            }, 1000);
         }
 
         function closeFaceID() {
@@ -475,18 +484,31 @@
             }
         }
 
-        function startEnrollment() {
+        async function startEnrollment() {
             const btn = document.getElementById('enroll-btn');
-            btn.innerHTML = '<span class="animate-pulse">Capturing...</span>';
-            btn.disabled = true;
-            stopDetection();
+            const video = document.getElementById('enroll-video');
 
-            setTimeout(() => {
-                state.faceEnrolled = true;
-                saveState();
-                stopCamera();
-                setView('maid');
-            }, 2000);
+            btn.innerHTML = '<span class="animate-pulse">Capturing Face Data...</span>';
+            btn.disabled = true;
+
+            try {
+                const result = await detectFace(video);
+                if (result) {
+                    state.faceDescriptor = Array.from(result.descriptor);
+                    state.faceEnrolled = true;
+                    saveState();
+                    stopDetection();
+                    stopCamera();
+                    setView('maid');
+                } else {
+                    btn.innerHTML = 'CAPTURE FAILED - RETRY';
+                    btn.disabled = false;
+                }
+            } catch (err) {
+                console.error("Enrollment error:", err);
+                btn.innerHTML = 'ERROR - RETRY';
+                btn.disabled = false;
+            }
         }
 
         function renderMaidView(app, salaryData) {
@@ -552,6 +574,7 @@
                         <div>
                             <p class="text-sm uppercase tracking-wider opacity-80">Salary so far</p>
                             <p class="text-4xl font-bold">${state.settings.currency}${Math.round(salaryData.currentSalary).toLocaleString()}</p>
+                            <p class="text-[10px] opacity-60 mt-1">Deductions: -${state.settings.currency}${Math.round(salaryData.totalMissedValue + salaryData.netLatePenalties)}</p>
                         </div>
                         <div class="text-right">
                             <p class="text-sm uppercase tracking-wider opacity-80">Credits</p>
@@ -718,6 +741,27 @@
                                         <input type="password" id="set-maid-pass" value="${state.settings.maidPassword}" onchange="updateSetting('maidPassword', this.value)" class="w-full border border-gray-200 rounded-xl p-3">
                                     </div>
                                 </div>
+
+                                <div class="pt-4 border-t border-gray-100">
+                                    <label class="text-xs font-bold text-gray-400 uppercase">Manual Credit Adjustment</label>
+                                    <div class="flex items-center justify-between mt-2 bg-gray-50 p-4 rounded-xl">
+                                        <div class="flex items-center gap-2">
+                                            <div class="bg-blue-100 p-2 rounded-lg">
+                                                <i data-lucide="star" class="w-5 h-5 text-blue-600 fill-current"></i>
+                                            </div>
+                                            <span class="font-bold text-lg">${state.credits} Credits</span>
+                                        </div>
+                                        <div class="flex gap-2">
+                                            <button onclick="adjustCredits(-1)" class="bg-white border border-gray-200 text-gray-700 w-10 h-10 rounded-lg font-bold shadow-sm active:scale-95 transition-transform flex items-center justify-center">
+                                                <i data-lucide="minus" class="w-4 h-4"></i>
+                                            </button>
+                                            <button onclick="adjustCredits(1)" class="bg-blue-600 text-white w-10 h-10 rounded-lg font-bold shadow-sm active:scale-95 transition-transform flex items-center justify-center">
+                                                <i data-lucide="plus" class="w-4 h-4"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <p class="text-[10px] text-gray-400 mt-2 italic">Note: Each credit cancels one ₹50 late penalty.</p>
+                                </div>
                             </div>
                         </div>
 
@@ -810,6 +854,12 @@
 
         function updateShift(index, field, value) {
             state.settings.shifts[index][field] = value;
+            saveState();
+            render();
+        }
+
+        function adjustCredits(delta) {
+            state.credits = Math.max(0, state.credits + delta);
             saveState();
             render();
         }
@@ -969,9 +1019,13 @@
                         <div class="bg-white rounded-3xl p-6 shadow-sm space-y-4">
                             <h2 class="font-bold text-gray-400 uppercase text-xs">Breakdown</h2>
                             <div class="space-y-3">
-                                <div class="flex justify-between text-green-600">
-                                    <span>Total Earnings</span>
-                                    <span class="font-bold">+${state.settings.currency}${Math.round(salaryData.totalEarnings)}</span>
+                                <div class="flex justify-between text-blue-600">
+                                    <span>Base Monthly Salary</span>
+                                    <span class="font-bold">${state.settings.currency}${Math.round(state.settings.monthlySalary)}</span>
+                                </div>
+                                <div class="flex justify-between text-red-600">
+                                    <span>Missed Shifts</span>
+                                    <span class="font-bold">-${state.settings.currency}${Math.round(salaryData.totalMissedValue)}</span>
                                 </div>
                                 <div class="flex justify-between text-yellow-600">
                                     <span>Late Penalties (Net)</span>
@@ -1049,7 +1103,7 @@
 
             state.attendance[dateStr][`shift${info.index}`] = record;
 
-            if (info.isEarly) {
+            if (info.isEarlyCredit) {
                 state.credits += 1;
             }
 
@@ -1071,11 +1125,11 @@
 
                 if (todayAttendance[`shift${i}`]) continue;
 
-                // Entry starts up to 30 mins early
-                const earlyMins = startMins - 30;
+                // Entry starts up to 60 mins early
+                const earlyMins = startMins - 60;
                 if (nowMins >= earlyMins && nowMins <= endMins) {
                     let status = 'on-time';
-                    let isEarly = nowMins < startMins;
+                    let isEarlyCredit = nowMins <= (startMins - 30);
                     if (nowMins > penaltyMins) {
                         status = 'late';
                     }
@@ -1086,7 +1140,7 @@
                         startTime: shiftCfg.start,
                         endTime: shiftCfg.end,
                         status: status,
-                        isEarly: isEarly,
+                        isEarlyCredit: isEarlyCredit,
                         nowMins: nowMins
                     };
                 }
