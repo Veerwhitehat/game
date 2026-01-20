@@ -144,30 +144,48 @@
             if (modelsLoaded) return;
             const MODEL_URL = 'https://justadudewhohacks.github.io/face-api.js/models';
             try {
+                // Try to initialize WebGL backend for performance
+                if (faceapi.tf && faceapi.tf.setBackend) {
+                    await faceapi.tf.setBackend('webgl').catch(() => faceapi.tf.setBackend('cpu'));
+                    await faceapi.tf.ready();
+                }
+
                 await Promise.all([
                     faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
                     faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
                     faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
                 ]);
                 modelsLoaded = true;
-                console.log("Face models loaded");
+                console.log("Face models loaded using backend:", faceapi.tf.getBackend());
             } catch (err) {
                 console.error("Failed to load face models", err);
+                // Try CPU fallback if WebGL failed
+                try {
+                    await faceapi.tf.setBackend('cpu');
+                    await loadFaceModels();
+                } catch(e) {}
             }
         }
 
-        async function detectFace(videoElement) {
+        async function detectFace(videoElement, useDescriptor = true) {
             if (!modelsLoaded) await loadFaceModels();
-            return await faceapi.detectSingleFace(videoElement, new faceapi.TinyFaceDetectorOptions())
-                .withFaceLandmarks()
-                .withFaceDescriptor();
+            const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 });
+            let task = faceapi.detectSingleFace(videoElement, options);
+            if (useDescriptor) {
+                return await task.withFaceLandmarks().withFaceDescriptor();
+            } else {
+                return await task;
+            }
         }
 
         // Constants for logic
         const SHIFT_WINDOW_MINS = 30;
 
-        function getCurrentDateStr() {
-            return new Date().toISOString().split('T')[0];
+        function getCurrentDateStr(date = new Date()) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
         }
 
         function getTimeInMinutes(timeStr) {
@@ -186,33 +204,28 @@
 
         function calculateSalary() {
             const now = new Date();
-            const year = now.getFullYear();
-            const month = now.getMonth();
-            const daysInMonth = getDaysInMonth(year, month);
-            const totalShiftsInMonth = daysInMonth * state.settings.shifts.length;
-            const shiftValue = state.settings.monthlySalary / totalShiftsInMonth;
-            const lastPayout = state.lastPayoutDate ? new Date(state.lastPayoutDate) : new Date(year, month, 1);
+            const lastPayout = state.lastPayoutDate ? new Date(state.lastPayoutDate) : new Date(now.getFullYear(), now.getMonth(), 1);
+
+            // Normalize lastPayout to start of its day for loop
+            let current = new Date(lastPayout.getFullYear(), lastPayout.getMonth(), lastPayout.getDate());
 
             let earnings = 0;
             let latePenalties = 0;
             let missedShifts = 0;
             let totalMissedValue = 0;
 
-            // Iterate through all days of the month up to now
-            for (let d = 1; d <= daysInMonth; d++) {
-                const date = new Date(year, month, d);
-                const dateStr = date.toISOString().split('T')[0];
-                const dayAttendance = state.attendance[dateStr] || {};
+            // Accurate shift value based on days in the month of last payout or current month
+            const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+            const shiftValue = state.settings.monthlySalary / (daysInMonth * state.settings.shifts.length);
 
-                // If this day is entirely before the last payout, skip it
-                if (date < new Date(lastPayout.getFullYear(), lastPayout.getMonth(), lastPayout.getDate())) continue;
-                // If the day is in the future, don't count misses yet
-                if (date > now && d > now.getDate()) continue;
+            while (current <= now) {
+                const dateStr = getCurrentDateStr(current);
+                const dayAttendance = state.attendance[dateStr] || {};
 
                 for (let i = 0; i < state.settings.shifts.length; i++) {
                     const shiftCfg = state.settings.shifts[i];
                     const shiftEndMins = getTimeInMinutes(shiftCfg.end);
-                    const shiftEndTime = new Date(year, month, d);
+                    const shiftEndTime = new Date(current.getFullYear(), current.getMonth(), current.getDate());
                     shiftEndTime.setHours(Math.floor(shiftEndMins / 60), shiftEndMins % 60, 0, 0);
 
                     const record = dayAttendance[`shift${i}`];
@@ -220,7 +233,7 @@
                     if (record) {
                         if (record.timestamp > lastPayout.getTime()) {
                             earnings += shiftValue;
-                            if (record.status === 'late' && !record.penaltyCanceled) {
+                            if (record.status === 'late') {
                                 latePenalties += 50;
                             }
                         }
@@ -232,6 +245,7 @@
                         }
                     }
                 }
+                current.setDate(current.getDate() + 1);
             }
 
             const availableCredits = state.credits;
@@ -239,10 +253,16 @@
             const actuallyCanceled = Math.min(availableCredits, potentialCancellations);
 
             const netLatePenalties = latePenalties - (actuallyCanceled * 50);
+
+            // "starts from 19000 and deducts"
             const currentSalary = state.settings.monthlySalary - totalMissedValue - netLatePenalties;
+
+            // "resets to 0" - this is the earnings so far
+            const earnedSoFar = earnings - netLatePenalties;
 
             return {
                 currentSalary: Math.max(0, currentSalary),
+                earnedSoFar: Math.max(0, earnedSoFar),
                 totalEarnings: earnings,
                 latePenalties,
                 netLatePenalties,
@@ -415,20 +435,48 @@
         }
 
         async function startCamera(videoId) {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                alert("Your browser does not support camera access or you are not in a secure (HTTPS) connection.");
+                return;
+            }
+
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: 'user',
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    }
+                });
                 const video = document.getElementById(videoId);
                 if (video) video.srcObject = stream;
                 window.currentStream = stream;
             } catch (err) {
                 console.error("Camera error:", err);
-                // Fallback for environments without camera
+                let errorMsg = "Could not start camera.";
+                if (err.name === 'NotAllowedError') {
+                    errorMsg = "Camera permission denied. Please enable it in your browser settings.";
+                } else if (err.name === 'NotFoundError') {
+                    errorMsg = "No camera found on this device.";
+                }
+
                 const video = document.getElementById(videoId);
                 if (video) {
-                    video.style.backgroundColor = '#333';
+                    video.style.backgroundColor = '#1a1a1a';
                     const placeholder = document.createElement('div');
-                    placeholder.className = 'absolute inset-0 flex items-center justify-center text-gray-500';
-                    placeholder.innerHTML = '<i data-lucide="video-off" class="w-12 h-12"></i>';
+                    placeholder.className = 'absolute inset-0 flex flex-col items-center justify-center text-gray-400 p-6 text-center z-10';
+                    placeholder.innerHTML = `
+                        <div class="bg-red-500/20 p-4 rounded-full mb-4">
+                            <i data-lucide="camera-off" class="w-10 h-10 text-red-500"></i>
+                        </div>
+                        <p class="text-lg font-bold text-white mb-2">${errorMsg}</p>
+                        <div class="text-xs text-gray-400 space-y-2 text-left bg-black/40 p-4 rounded-xl border border-white/10">
+                            <p class="font-bold text-gray-300">How to fix:</p>
+                            <p>1. Click the <strong class="text-blue-400">Lock 🔒</strong> icon in the address bar (top left).</p>
+                            <p>2. Find <strong>Camera</strong> and turn it <strong class="text-green-400">ON</strong>.</p>
+                            <p>3. Refresh the page.</p>
+                        </div>
+                    `;
                     video.parentElement.appendChild(placeholder);
                     lucide.createIcons();
                 }
@@ -454,7 +502,7 @@
             detectionInterval = setInterval(async () => {
                 if (!video || video.paused || video.ended) return;
 
-                const detection = await detectFace(video);
+                const detection = await detectFace(video, false);
                 if (detection) {
                     if (status) {
                         status.textContent = "FACE DETECTED ✅";
@@ -573,8 +621,8 @@
                     <div class="mt-8 bg-white/20 p-6 rounded-3xl backdrop-blur-sm flex justify-between items-center">
                         <div>
                             <p class="text-sm uppercase tracking-wider opacity-80">Salary so far</p>
-                            <p class="text-4xl font-bold">${state.settings.currency}${Math.round(salaryData.currentSalary).toLocaleString()}</p>
-                            <p class="text-[10px] opacity-60 mt-1">Deductions: -${state.settings.currency}${Math.round(salaryData.totalMissedValue + salaryData.netLatePenalties)}</p>
+                            <p class="text-4xl font-bold">${state.settings.currency}${Math.round(salaryData.earnedSoFar).toLocaleString()}</p>
+                            <p class="text-[10px] opacity-60 mt-1">Net Payable: ${state.settings.currency}${Math.round(salaryData.currentSalary).toLocaleString()}</p>
                         </div>
                         <div class="text-right">
                             <p class="text-sm uppercase tracking-wider opacity-80">Credits</p>
@@ -1160,6 +1208,9 @@
 
         // Initial check for Lucide icons
         window.onload = () => {
+            if (window.location.protocol === 'http:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+                alert("SECURITY ALERT: This app requires HTTPS for Camera/Face ID to work correctly. Please use a secure connection.");
+            }
             render();
 
             // Register Service Worker
