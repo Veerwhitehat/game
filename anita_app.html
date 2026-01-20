@@ -6,7 +6,6 @@
     <title>Anita Attendance & Salary Tracker</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
     <style>
@@ -36,30 +35,6 @@
     </div>
 
     <!-- Face ID Modal -->
-    <div id="faceid-modal" class="fixed inset-0 bg-black bg-opacity-80 z-50 flex items-center justify-center hidden">
-        <div class="bg-white rounded-[3rem] p-8 w-[90%] max-w-sm text-center space-y-6">
-            <h2 class="text-2xl font-bold">Checking Face...</h2>
-            <div class="relative w-64 h-64 mx-auto overflow-hidden rounded-[2rem] bg-black">
-                <video id="auth-video" autoplay playsinline class="w-full h-full object-cover opacity-60"></video>
-                <div id="faceid-scanner-line" class="absolute top-0 left-0 w-full h-1 bg-blue-500 shadow-[0_0_15px_rgba(59,130,246,1)] animate-[scan_2s_ease-in-out_infinite]"></div>
-                <div class="absolute inset-0 border-4 border-blue-500/30 rounded-[2rem] pointer-events-none"></div>
-            </div>
-            <style>
-                @keyframes scan {
-                    0%, 100% { top: 0; }
-                    50% { top: 100%; }
-                }
-            </style>
-            <p id="faceid-msg" class="text-gray-600 font-medium">Anita, please look at the camera</p>
-            <div id="faceid-actions" class="flex flex-col space-y-3">
-                <div class="grid grid-cols-2 gap-2">
-                    <button onclick="simulateFaceID(true)" class="bg-green-500 text-white py-4 rounded-2xl font-bold text-sm">MATCH</button>
-                    <button onclick="simulateFaceID(false)" class="bg-red-500 text-white py-4 rounded-2xl font-bold text-sm">NO MATCH</button>
-                </div>
-                <button onclick="closeFaceID()" class="text-gray-400 py-2 text-sm font-bold uppercase tracking-wider">Cancel</button>
-            </div>
-        </div>
-    </div>
 
     <!-- Admin Login Modal -->
     <div id="admin-login-modal" class="fixed inset-0 bg-black bg-opacity-80 z-50 flex items-center justify-center hidden">
@@ -95,7 +70,7 @@
                 { start: "18:00", penalty: "18:30", end: "19:00" }
             ],
             adminPassword: "4248",
-            maidPassword: "anita",
+            maidPassword: "9090",
             currency: "₹",
             darkMode: false
         };
@@ -106,7 +81,6 @@
             credits: 0,
             payouts: [],
             lastPayoutDate: null,
-            faceEnrolled: false
         };
 
         function saveState() {
@@ -140,43 +114,7 @@
 
         // Face API Helpers
         let modelsLoaded = false;
-        async function loadFaceModels() {
-            if (modelsLoaded) return;
-            const MODEL_URL = 'https://justadudewhohacks.github.io/face-api.js/models';
-            try {
-                // Try to initialize WebGL backend for performance
-                if (faceapi.tf && faceapi.tf.setBackend) {
-                    await faceapi.tf.setBackend('webgl').catch(() => faceapi.tf.setBackend('cpu'));
-                    await faceapi.tf.ready();
-                }
 
-                await Promise.all([
-                    faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-                    faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-                    faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
-                ]);
-                modelsLoaded = true;
-                console.log("Face models loaded using backend:", faceapi.tf.getBackend());
-            } catch (err) {
-                console.error("Failed to load face models", err);
-                // Try CPU fallback if WebGL failed
-                try {
-                    await faceapi.tf.setBackend('cpu');
-                    await loadFaceModels();
-                } catch(e) {}
-            }
-        }
-
-        async function detectFace(videoElement, useDescriptor = true) {
-            if (!modelsLoaded) await loadFaceModels();
-            const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 });
-            let task = faceapi.detectSingleFace(videoElement, options);
-            if (useDescriptor) {
-                return await task.withFaceLandmarks().withFaceDescriptor();
-            } else {
-                return await task;
-            }
-        }
 
         // Constants for logic
         const SHIFT_WINDOW_MINS = 30;
@@ -214,13 +152,13 @@
             let missedShifts = 0;
             let totalMissedValue = 0;
 
-            // Accurate shift value based on days in the month of last payout or current month
-            const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-            const shiftValue = state.settings.monthlySalary / (daysInMonth * state.settings.shifts.length);
-
             while (current <= now) {
                 const dateStr = getCurrentDateStr(current);
                 const dayAttendance = state.attendance[dateStr] || {};
+
+                // Accurate shift value based on days in the actual month we are iterating
+                const daysInIterationMonth = new Date(current.getFullYear(), current.getMonth() + 1, 0).getDate();
+                const shiftValue = state.settings.monthlySalary / (daysInIterationMonth * state.settings.shifts.length);
 
                 for (let i = 0; i < state.settings.shifts.length; i++) {
                     const shiftCfg = state.settings.shifts[i];
@@ -276,78 +214,9 @@
         let currentAuthCallback = null;
 
         let authDetectionInterval = null;
-        function showFaceID(callback) {
-            currentAuthCallback = callback;
-            document.getElementById('faceid-modal').classList.remove('hidden');
-            document.getElementById('faceid-msg').textContent = "Scanning face...";
-            document.getElementById('faceid-msg').className = "text-gray-600 font-medium";
 
-            // Hide simulation buttons in production
-            document.getElementById('faceid-actions').innerHTML = `
-                <button onclick="closeFaceID()" class="text-gray-400 py-2 text-sm font-bold uppercase tracking-wider">Cancel</button>
-            `;
 
-            startCamera('auth-video').then(() => {
-                startAuthDetection();
-            });
-            lucide.createIcons();
-        }
 
-        async function startAuthDetection() {
-            const video = document.getElementById('auth-video');
-            const msg = document.getElementById('faceid-msg');
-            let matchCount = 0;
-
-            authDetectionInterval = setInterval(async () => {
-                if (!video || video.paused || video.ended) return;
-                const result = await detectFace(video);
-
-                if (result) {
-                    // Compare with stored descriptor
-                    const dist = faceapi.euclideanDistance(result.descriptor, new Float32Array(state.faceDescriptor));
-                    console.log("Face distance:", dist);
-
-                    if (dist < 0.6) { // 0.6 is standard threshold
-                        matchCount++;
-                        msg.textContent = "VERIFYING IDENTITY... " + (".".repeat(matchCount));
-                        msg.className = "text-green-600 font-bold";
-
-                        if (matchCount >= 3) {
-                            clearInterval(authDetectionInterval);
-                            onFaceMatchSuccess();
-                        }
-                    } else {
-                        matchCount = 0;
-                        msg.textContent = "Face does not match!";
-                        msg.className = "text-red-500 font-bold";
-                    }
-                } else {
-                    matchCount = 0;
-                    msg.textContent = "Anita, please look at the camera";
-                    msg.className = "text-gray-600 font-medium";
-                }
-            }, 600);
-        }
-
-        function onFaceMatchSuccess() {
-            const msg = document.getElementById('faceid-msg');
-            msg.textContent = "Identity Confirmed ✅";
-            msg.className = "text-green-600 font-bold text-xl";
-            setTimeout(() => {
-                closeFaceID();
-                if (currentAuthCallback) currentAuthCallback('faceid');
-            }, 1000);
-        }
-
-        function closeFaceID() {
-            document.getElementById('faceid-modal').classList.add('hidden');
-            document.getElementById('faceid-msg').classList.remove('text-green-600', 'text-red-600');
-            if (authDetectionInterval) {
-                clearInterval(authDetectionInterval);
-                authDetectionInterval = null;
-            }
-            stopCamera();
-        }
 
         function showPasswordModal() {
             document.getElementById('password-modal').classList.remove('hidden');
@@ -390,13 +259,7 @@
             const app = document.getElementById('app');
             const salaryData = calculateSalary();
 
-            if (!state.faceEnrolled && currentView !== 'admin') {
-                currentView = 'enroll';
-            }
-
-            if (currentView === 'enroll') {
-                renderEnrollView(app);
-            } else if (currentView === 'maid') {
+            if (currentView === 'maid') {
                 renderMaidView(app, salaryData);
             } else if (currentView === 'admin') {
                 renderAdminView(app, salaryData);
@@ -406,33 +269,6 @@
             lucide.createIcons();
         }
 
-        function renderEnrollView(app) {
-            app.innerHTML = `
-                <div class="flex flex-col items-center justify-center min-h-screen p-8 bg-blue-600 text-white text-center">
-                    <div class="mb-8">
-                        <i data-lucide="user-plus" class="w-16 h-16 mx-auto mb-4"></i>
-                        <h1 class="text-3xl font-bold">Hello Anita!</h1>
-                        <p class="opacity-90 text-lg">We need to see your face to setup the app.</p>
-                    </div>
-
-                    <div class="relative w-64 h-64 mx-auto mb-10 overflow-hidden rounded-[3rem] border-4 border-white shadow-2xl bg-black">
-                        <video id="enroll-video" autoplay playsinline class="w-full h-full object-cover"></video>
-                        <div id="enroll-scan-overlay" class="absolute inset-0 border-[20px] border-blue-600/30 rounded-[3rem] pointer-events-none"></div>
-                        <div id="enroll-face-marker" class="absolute hidden border-2 border-green-500 rounded-full pointer-events-none"></div>
-                    </div>
-
-                    <p id="enroll-status" class="mb-6 font-bold text-yellow-300">Loading face detection...</p>
-
-                    <button onclick="startEnrollment()" id="enroll-btn" disabled class="bg-white/50 text-blue-600 w-full py-6 rounded-3xl text-2xl font-bold shadow-xl cursor-not-allowed">
-                        REGISTER MY FACE
-                    </button>
-                    <p class="mt-6 text-sm opacity-60">Please look directly at the camera</p>
-                </div>
-            `;
-            startCamera('enroll-video').then(() => {
-                startDetectionLoop('enroll-video', 'enroll-status', 'enroll-btn');
-            });
-        }
 
         async function startCamera(videoId) {
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -491,73 +327,8 @@
         }
 
         let detectionInterval = null;
-        async function startDetectionLoop(videoId, statusId, btnId) {
-            const video = document.getElementById(videoId);
-            const status = document.getElementById(statusId);
-            const btn = document.getElementById(btnId);
 
-            await loadFaceModels();
-            if (status) status.textContent = "Adjusting camera...";
 
-            detectionInterval = setInterval(async () => {
-                if (!video || video.paused || video.ended) return;
-
-                const detection = await detectFace(video, false);
-                if (detection) {
-                    if (status) {
-                        status.textContent = "FACE DETECTED ✅";
-                        status.className = "mb-6 font-bold text-green-400";
-                    }
-                    if (btn) {
-                        btn.disabled = false;
-                        btn.className = "bg-white text-blue-600 w-full py-6 rounded-3xl text-2xl font-bold shadow-xl active:scale-95 transition-transform";
-                    }
-                } else {
-                    if (status) {
-                        status.textContent = "LOOK AT CAMERA ❌";
-                        status.className = "mb-6 font-bold text-yellow-300";
-                    }
-                    if (btn) {
-                        btn.disabled = true;
-                        btn.className = "bg-white/50 text-blue-600 w-full py-6 rounded-3xl text-2xl font-bold shadow-xl cursor-not-allowed";
-                    }
-                }
-            }, 500);
-        }
-
-        function stopDetection() {
-            if (detectionInterval) {
-                clearInterval(detectionInterval);
-                detectionInterval = null;
-            }
-        }
-
-        async function startEnrollment() {
-            const btn = document.getElementById('enroll-btn');
-            const video = document.getElementById('enroll-video');
-
-            btn.innerHTML = '<span class="animate-pulse">Capturing Face Data...</span>';
-            btn.disabled = true;
-
-            try {
-                const result = await detectFace(video);
-                if (result) {
-                    state.faceDescriptor = Array.from(result.descriptor);
-                    state.faceEnrolled = true;
-                    saveState();
-                    stopDetection();
-                    stopCamera();
-                    setView('maid');
-                } else {
-                    btn.innerHTML = 'CAPTURE FAILED - RETRY';
-                    btn.disabled = false;
-                }
-            } catch (err) {
-                console.error("Enrollment error:", err);
-                btn.innerHTML = 'ERROR - RETRY';
-                btn.disabled = false;
-            }
-        }
 
         function renderMaidView(app, salaryData) {
             const shiftInfo = getCurrentShiftInfo();
@@ -570,9 +341,9 @@
 
                 actionButtonHtml = `
                     <div class="p-6">
-                        <button onclick="showFaceID(logAttendance)" class="${statusColor} w-full text-white rounded-[2.5rem] p-10 shadow-2xl flex flex-col items-center justify-center space-y-4 transform active:scale-95 transition-all">
+                        <button onclick="showPasswordAuth(logAttendance)" class="${statusColor} w-full text-white rounded-[2.5rem] p-10 shadow-2xl flex flex-col items-center justify-center space-y-4 transform active:scale-95 transition-all">
                             <div class="bg-white/20 p-4 rounded-full">
-                                <i data-lucide="fingerprint" class="w-16 h-16"></i>
+                                <i data-lucide="key-round" class="w-16 h-16"></i>
                             </div>
                             <span class="text-4xl font-extrabold uppercase tracking-tighter">I AM HERE</span>
                             <span class="text-lg font-bold opacity-90 bg-black/20 px-4 py-1 rounded-full underline decoration-2">${statusText} (${shiftInfo.startTime})</span>
@@ -1060,28 +831,24 @@
 
                     <div class="p-6 space-y-6">
                         <div class="bg-blue-600 rounded-[2rem] p-8 text-white shadow-xl text-center">
-                            <p class="uppercase tracking-widest text-xs opacity-70 mb-2">Total Amount to Pay</p>
-                            <p class="text-6xl font-extrabold">${state.settings.currency}${Math.round(salaryData.currentSalary).toLocaleString()}</p>
+                            <p class="uppercase tracking-widest text-xs opacity-70 mb-2">Amount You Have Earned</p>
+                            <p class="text-6xl font-extrabold">${state.settings.currency}${Math.round(salaryData.earnedSoFar).toLocaleString()}</p>
                         </div>
 
                         <div class="bg-white rounded-3xl p-6 shadow-sm space-y-4">
                             <h2 class="font-bold text-gray-400 uppercase text-xs">Breakdown</h2>
                             <div class="space-y-3">
-                                <div class="flex justify-between text-blue-600">
-                                    <span>Base Monthly Salary</span>
-                                    <span class="font-bold">${state.settings.currency}${Math.round(state.settings.monthlySalary)}</span>
-                                </div>
-                                <div class="flex justify-between text-red-600">
-                                    <span>Missed Shifts</span>
-                                    <span class="font-bold">-${state.settings.currency}${Math.round(salaryData.totalMissedValue)}</span>
+                                <div class="flex justify-between text-green-600">
+                                    <span>Earned from Shifts</span>
+                                    <span class="font-bold">+${state.settings.currency}${Math.round(salaryData.totalEarnings)}</span>
                                 </div>
                                 <div class="flex justify-between text-yellow-600">
                                     <span>Late Penalties (Net)</span>
                                     <span>-${state.settings.currency}${salaryData.netLatePenalties}</span>
                                 </div>
                                 <div class="pt-3 border-t flex justify-between font-bold text-lg">
-                                    <span>Final Salary</span>
-                                    <span class="text-blue-600">${state.settings.currency}${Math.round(salaryData.currentSalary)}</span>
+                                    <span>Final Payout</span>
+                                    <span class="text-blue-600">${state.settings.currency}${Math.round(salaryData.earnedSoFar)}</span>
                                 </div>
                             </div>
                         </div>
@@ -1093,9 +860,9 @@
                             </p>
                         </div>
 
-                        <button onclick="showFaceID(completePayout)" class="bg-green-600 w-full text-white rounded-2xl py-6 shadow-lg flex flex-col items-center justify-center space-y-2 transform active:scale-95 transition-transform">
+                        <button onclick="showPasswordAuth(completePayout)" class="bg-green-600 w-full text-white rounded-2xl py-6 shadow-lg flex flex-col items-center justify-center space-y-2 transform active:scale-95 transition-transform">
                             <span class="text-2xl font-bold uppercase tracking-wide">Transaction Done</span>
-                            <span class="text-xs opacity-80 uppercase font-bold">Requires Face ID</span>
+                            <span class="text-xs opacity-80 uppercase font-bold">Enter Password</span>
                         </button>
                     </div>
                 </div>
@@ -1118,6 +885,11 @@
             saveState();
             alert("Salary Payout Completed Successfully!");
             setView('maid');
+        }
+
+        function showPasswordAuth(callback) {
+            currentAuthCallback = callback;
+            showPasswordModal();
         }
 
         function submitMaidPassword() {
