@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SPACE JUNK PANIC!</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap');
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Orbitron', sans-serif;
+            color: #fff;
+            user-select: none;
+        }
+
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        .neon-text {
+            text-shadow: 0 0 10px rgba(0, 255, 255, 0.8), 0 0 20px rgba(0, 255, 255, 0.5);
+        }
+
+        .neon-border {
+            border: 2px solid #0ff;
+            box-shadow: 0 0 10px #0ff, inset 0 0 10px #0ff;
+        }
+
+        .danger-bar {
+            transition: width 0.3s ease-out, background-color 0.3s ease;
+        }
+
+        #warning-overlay {
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle, transparent 50%, rgba(255, 0, 0, 0.2) 100%);
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.5s;
+            z-index: 10;
+        }
+
+        @keyframes pulse-red {
+            0% { opacity: 0.2; }
+            50% { opacity: 0.6; }
+            100% { opacity: 0.2; }
+        }
+
+        .pulse-warning {
+            animation: pulse-red 0.5s infinite;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <div id="warning-overlay"></div>
+        <canvas id="gameCanvas"></canvas>
+
+        <!-- HUD -->
+        <div id="hud" class="absolute inset-0 pointer-events-none p-8 flex flex-col justify-between">
+            <div class="flex justify-between items-start">
+                <div class="text-left">
+                    <div class="text-xs uppercase tracking-widest text-cyan-400 opacity-70">Orbit Stability</div>
+                    <div class="w-64 h-4 bg-gray-900 rounded-full mt-1 border border-cyan-900 overflow-hidden">
+                        <div id="danger-meter" class="danger-bar h-full bg-cyan-500 w-0"></div>
+                    </div>
+                </div>
+                <div class="text-center">
+                    <div id="timer" class="text-6xl font-black neon-text">30</div>
+                    <div class="text-xs uppercase tracking-widest text-cyan-400">Seconds Remaining</div>
+                </div>
+                <div class="text-right">
+                    <div class="text-xs uppercase tracking-widest text-cyan-400 opacity-70">Score</div>
+                    <div id="score" class="text-4xl font-bold neon-text">0000</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Overlays -->
+        <div id="overlay" class="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-60 transition-opacity duration-500">
+            <div id="start-screen" class="text-center">
+                <h1 class="text-7xl font-black mb-2 tracking-tighter neon-text">SPACE JUNK PANIC!</h1>
+                <p class="text-xl tracking-widest text-cyan-400 mb-8">SURVIVE 30 SECONDS</p>
+                <div class="animate-pulse text-sm opacity-50">DEFENSE SYSTEM INITIALIZING...</div>
+            </div>
+
+            <div id="win-screen" class="hidden text-center">
+                <h1 class="text-7xl font-black mb-2 tracking-tighter text-green-400 neon-text" style="text-shadow: 0 0 20px rgba(74, 222, 128, 0.8)">ORBIT STABILIZED!</h1>
+                <p id="final-score-win" class="text-3xl mb-8">SCORE: 0</p>
+                <p class="text-xl text-cyan-400">NEXT MISSION IN 3...</p>
+            </div>
+
+            <div id="lose-screen" class="hidden text-center">
+                <h1 class="text-7xl font-black mb-2 tracking-tighter text-red-500 neon-text" style="text-shadow: 0 0 20px rgba(239, 68, 68, 0.8)">ORBITAL COLLAPSE</h1>
+                <p id="final-score-lose" class="text-3xl mb-8">SCORE: 0</p>
+                <p class="text-xl text-cyan-400">RETRYING IN 3...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Audio Engine
+        const AudioEngine = {
+            ctx: null,
+            mainGain: null,
+            humOsc: null,
+            sirenOsc: null,
+            sirenGain: null,
+
+            init() {
+                try {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                    this.mainGain = this.ctx.createGain();
+                    this.mainGain.connect(this.ctx.destination);
+                    this.mainGain.gain.value = 0.3;
+                    this.startHum();
+                } catch(e) { console.error("Audio failed", e); }
+            },
+
+            startHum() {
+                this.humOsc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                this.humOsc.type = 'sawtooth';
+                this.humOsc.frequency.value = 50;
+                gain.gain.value = 0.05;
+                this.humOsc.connect(gain);
+                gain.connect(this.mainGain);
+                this.humOsc.start();
+            },
+
+            playLaser() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(880, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(110, this.ctx.currentTime + 0.1);
+                gain.gain.setValueAtTime(0.1, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.1);
+                osc.connect(gain);
+                gain.connect(this.mainGain);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.1);
+            },
+
+            playExplosion(isBig) {
+                if (!this.ctx) return;
+                const bufferSize = this.ctx.sampleRate * (isBig ? 0.5 : 0.2);
+                const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    data[i] = Math.random() * 2 - 1;
+                }
+                const noise = this.ctx.createBufferSource();
+                noise.buffer = buffer;
+                const filter = this.ctx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.setValueAtTime(isBig ? 1000 : 2000, this.ctx.currentTime);
+                filter.frequency.exponentialRampToValueAtTime(100, this.ctx.currentTime + (isBig ? 0.5 : 0.2));
+                const gain = this.ctx.createGain();
+                gain.gain.setValueAtTime(isBig ? 0.5 : 0.2, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + (isBig ? 0.5 : 0.2));
+                noise.connect(filter);
+                filter.connect(gain);
+                gain.connect(this.mainGain);
+                noise.start();
+            },
+
+            playSiren(active) {
+                if (!this.ctx) return;
+                if (active) {
+                    if (!this.sirenOsc) {
+                        this.sirenOsc = this.ctx.createOscillator();
+                        this.sirenGain = this.ctx.createGain();
+                        this.sirenOsc.type = 'triangle';
+                        this.sirenOsc.frequency.value = 440;
+                        this.sirenGain.gain.value = 0;
+                        this.sirenOsc.connect(this.sirenGain);
+                        this.sirenGain.connect(this.mainGain);
+                        this.sirenOsc.start();
+                    }
+                    // Simple siren modulation
+                    const now = this.ctx.currentTime;
+                    this.sirenOsc.frequency.cancelScheduledValues(now);
+                    this.sirenOsc.frequency.setValueAtTime(440, now);
+                    this.sirenOsc.frequency.linearRampToValueAtTime(880, now + 0.5);
+                    this.sirenOsc.frequency.linearRampToValueAtTime(440, now + 1.0);
+                    this.sirenGain.gain.setTargetAtTime(0.05, now, 0.1);
+                } else if (this.sirenGain) {
+                    this.sirenGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.1);
+                }
+            },
+
+            playBeat() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(60, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(30, this.ctx.currentTime + 0.1);
+                gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.1);
+                osc.connect(gain);
+                gain.connect(this.mainGain);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.1);
+            }
+        };
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const dangerMeter = document.getElementById('danger-meter');
+        const timerElement = document.getElementById('timer');
+        const scoreElement = document.getElementById('score');
+        const overlay = document.getElementById('overlay');
+        const startScreen = document.getElementById('start-screen');
+        const winScreen = document.getElementById('win-screen');
+        const loseScreen = document.getElementById('lose-screen');
+
+        const EARTH_RADIUS = 60;
+        const ORBIT_RADIUS = 150;
+        const SAT_SIZE = 15;
+        const MAX_JUNK = 80;
+        const GAME_DURATION = 30;
+
+        let gameState = 'START';
+        let score = 0;
+        let combo = 0;
+        let comboTimer = 0;
+        let chainReactions = 0;
+        let timeLeft = GAME_DURATION;
+        let lastTime = 0;
+        let satelliteAngle = 0;
+        let keys = {};
+        let projectiles = [];
+        let junk = [];
+        let particles = [];
+        let shakeAmount = 0;
+        let flashAmount = 0;
+        let spawnTimer = 0;
+        let difficultyLevel = 0;
+        let beatTimer = 0;
+        let earthRotation = 0;
+
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        window.addEventListener('keydown', e => keys[e.code] = true);
+        window.addEventListener('keyup', e => keys[e.code] = false);
+
+        function handleInput(dt) {
+            const rotSpeed = 4;
+            if (keys['ArrowLeft']) satelliteAngle -= rotSpeed * dt;
+            if (keys['ArrowRight']) satelliteAngle += rotSpeed * dt;
+            if (keys['Space']) {
+                fireLaser();
+                keys['Space'] = false;
+            }
+        }
+
+        function createExplosion(x, y, color, isChainReaction) {
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            const distToEarth = Math.sqrt((x - centerX)**2 + (y - centerY)**2);
+
+            if (isChainReaction && distToEarth < EARTH_RADIUS + 30) {
+                gameOver(false);
+            }
+
+            AudioEngine.playExplosion(isChainReaction);
+            if (isChainReaction) flashAmount = 0.3;
+
+            for (let i = 0; i < (isChainReaction ? 20 : 10); i++) {
+                particles.push({
+                    x, y,
+                    vx: (Math.random() - 0.5) * 200,
+                    vy: (Math.random() - 0.5) * 200,
+                    life: 0.5 + Math.random() * 0.5,
+                    color: color,
+                    size: 2 + Math.random() * 3
+                });
+            }
+
+            if (isChainReaction) {
+                const count = 2 + Math.floor(Math.random() * 3);
+                for (let i = 0; i < count; i++) {
+                    spawnJunk('SMALL', x, y);
+                }
+            }
+        }
+
+        function fireLaser() {
+            if (gameState !== 'PLAYING') return;
+            AudioEngine.playLaser();
+            projectiles.push({
+                angle: satelliteAngle,
+                distance: ORBIT_RADIUS,
+                speed: 600,
+                life: 0.5
+            });
+        }
+
+        function spawnJunk(type = null, x = null, y = null, angle = null, distance = null) {
+            const isSmall = type === 'SMALL' || (type === null && Math.random() > 0.3);
+            const size = isSmall ? 4 + Math.random() * 4 : 12 + Math.random() * 8;
+
+            let jAngle = angle !== null ? angle : Math.random() * Math.PI * 2;
+            let jDistance = distance !== null ? distance : ORBIT_RADIUS + 50 + Math.random() * 200;
+
+            if (x !== null && y !== null) {
+                const centerX = canvas.width / 2;
+                const centerY = canvas.height / 2;
+                const dx = x - centerX;
+                const dy = y - centerY;
+                jAngle = Math.atan2(dy, dx);
+                jDistance = Math.sqrt(dx*dx + dy*dy);
+            }
+
+            junk.push({
+                angle: jAngle,
+                distance: jDistance,
+                orbitalSpeed: (isSmall ? 0.5 + Math.random() * 0.5 : 0.2 + Math.random() * 0.3) * (Math.random() > 0.5 ? 1 : -1),
+                radialSpeed: (Math.random() - 0.5) * 10,
+                size: size,
+                type: isSmall ? 'SMALL' : 'LARGE',
+                color: isSmall ? '#fff' : '#f97316'
+            });
+        }
+
+        function update(time) {
+            if (gameState === 'START') {
+                lastTime = time;
+            }
+            const dt = (time - lastTime) / 1000;
+            if (isNaN(dt) || dt > 0.1) {
+                lastTime = time;
+                requestAnimationFrame(update);
+                return;
+            }
+            lastTime = time;
+
+            if (gameState === 'PLAYING') {
+                handleInput(dt);
+
+                beatTimer -= dt;
+                if (beatTimer <= 0) {
+                    AudioEngine.playBeat();
+                    beatTimer = Math.max(0.1, 0.5 - (difficultyLevel * 0.05));
+                }
+
+                if (comboTimer > 0) {
+                    comboTimer -= dt;
+                    if (comboTimer <= 0) combo = 0;
+                }
+
+                timeLeft -= dt;
+                timerElement.textContent = Math.ceil(Math.max(0, timeLeft));
+
+                const warningOverlay = document.getElementById('warning-overlay');
+                if (timeLeft < 5) {
+                    warningOverlay.style.opacity = '1';
+                    warningOverlay.classList.add('pulse-warning');
+                } else {
+                    warningOverlay.style.opacity = '0';
+                    warningOverlay.classList.remove('pulse-warning');
+                }
+
+                if (timeLeft <= 0) {
+                    gameOver(true);
+                }
+
+                difficultyLevel = Math.floor((30 - timeLeft) / 5);
+
+                spawnTimer -= dt;
+                if (spawnTimer <= 0) {
+                    spawnJunk();
+                    spawnTimer = Math.max(0.15, 1.0 - difficultyLevel * 0.15);
+                }
+
+                const danger = junk.length / MAX_JUNK;
+                dangerMeter.style.width = `${danger * 100}%`;
+                if (danger > 0.8) {
+                    dangerMeter.classList.remove('bg-cyan-500');
+                    dangerMeter.classList.add('bg-red-500');
+                    AudioEngine.playSiren(true);
+                } else {
+                    dangerMeter.classList.add('bg-cyan-500');
+                    dangerMeter.classList.remove('bg-red-500');
+                    AudioEngine.playSiren(false);
+                }
+
+                if (junk.length >= MAX_JUNK) {
+                    gameOver(false);
+                }
+
+                scoreElement.textContent = score.toString().padStart(4, '0');
+
+                junk.forEach(j => {
+                    j.angle += j.orbitalSpeed * dt;
+                    j.distance += j.radialSpeed * dt;
+                    if (j.distance < EARTH_RADIUS + 10) j.radialSpeed = Math.abs(j.radialSpeed);
+                    if (j.distance > 600) j.radialSpeed = -Math.abs(j.radialSpeed);
+                });
+
+                projectiles.forEach((p, i) => {
+                    p.distance += p.speed * dt;
+                    p.life -= dt;
+                    if (p.life <= 0) projectiles.splice(i, 1);
+                });
+
+                particles.forEach((p, i) => {
+                    p.x += p.vx * dt;
+                    p.y += p.vy * dt;
+                    p.life -= dt;
+                    if (p.life <= 0) particles.splice(i, 1);
+                });
+
+                const centerX = canvas.width / 2;
+                const centerY = canvas.height / 2;
+
+                for (let i = projectiles.length - 1; i >= 0; i--) {
+                    const p = projectiles[i];
+                    const px = centerX + Math.cos(p.angle) * p.distance;
+                    const py = centerY + Math.sin(p.angle) * p.distance;
+
+                    for (let j = junk.length - 1; j >= 0; j--) {
+                        const debris = junk[j];
+                        const dx = centerX + Math.cos(debris.angle) * debris.distance;
+                        const dy = centerY + Math.sin(debris.angle) * debris.distance;
+                        const dist = Math.sqrt((px - dx)**2 + (py - dy)**2);
+                        if (dist < debris.size + 10) {
+                            createExplosion(dx, dy, debris.color, false);
+                            junk.splice(j, 1);
+                            projectiles.splice(i, 1);
+                            combo++;
+                            comboTimer = 1.0;
+                            score += 10 * Math.min(combo, 5);
+                            break;
+                        }
+                    }
+                }
+
+                for (let i = junk.length - 1; i >= 0; i--) {
+                    const j1 = junk[i];
+                    const x1 = centerX + Math.cos(j1.angle) * j1.distance;
+                    const y1 = centerY + Math.sin(j1.angle) * j1.distance;
+                    for (let k = i - 1; k >= 0; k--) {
+                        const j2 = junk[k];
+                        const x2 = centerX + Math.cos(j2.angle) * j2.distance;
+                        const y2 = centerY + Math.sin(j2.angle) * j2.distance;
+                        const dist = Math.sqrt((x1 - x2)**2 + (y1 - y2)**2);
+                        if (dist < j1.size + j2.size) {
+                            createExplosion((x1 + x2) / 2, (y1 + y2) / 2, '#ff4400', true);
+                            junk.splice(i, 1);
+                            junk.splice(k, 1);
+                            shakeAmount = 10;
+                            chainReactions++;
+                            combo = 0;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            draw(dt);
+            requestAnimationFrame(update);
+        }
+
+        function draw(dt) {
+            if (flashAmount > 0) {
+                ctx.fillStyle = `rgba(255, 255, 255, ${flashAmount})`;
+                flashAmount *= 0.9;
+            } else {
+                ctx.fillStyle = '#000';
+            }
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            ctx.save();
+            if (shakeAmount > 0) {
+                ctx.translate(Math.random() * shakeAmount - shakeAmount/2, Math.random() * shakeAmount - shakeAmount/2);
+                shakeAmount *= 0.9;
+            }
+            // Draw Earth
+            earthRotation += 0.2 * dt;
+            ctx.save();
+            ctx.translate(centerX, centerY);
+            ctx.rotate(earthRotation);
+            ctx.beginPath();
+            ctx.arc(0, 0, EARTH_RADIUS, 0, Math.PI * 2);
+            ctx.fillStyle = '#1e3a8a';
+            ctx.fill();
+            // Simple Earth details
+            ctx.fillStyle = '#10b981';
+            ctx.beginPath();
+            ctx.arc(10, -20, 15, 0, Math.PI * 2);
+            ctx.arc(-20, 10, 20, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, EARTH_RADIUS, 0, Math.PI * 2);
+            ctx.strokeStyle = '#3b82f6';
+            ctx.lineWidth = 4;
+            ctx.stroke();
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = '#3b82f6';
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, ORBIT_RADIUS, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(0, 255, 255, 0.2)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([5, 10]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            const satX = centerX + Math.cos(satelliteAngle) * ORBIT_RADIUS;
+            const satY = centerY + Math.sin(satelliteAngle) * ORBIT_RADIUS;
+            ctx.save();
+            ctx.translate(satX, satY);
+            ctx.rotate(satelliteAngle);
+            ctx.fillStyle = '#0ff';
+            ctx.fillRect(-SAT_SIZE/2, -SAT_SIZE/2, SAT_SIZE, SAT_SIZE);
+            ctx.fillRect(-SAT_SIZE, -2, SAT_SIZE*2, 4);
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = '#0ff';
+            ctx.strokeRect(-SAT_SIZE/2, -SAT_SIZE/2, SAT_SIZE, SAT_SIZE);
+            ctx.restore();
+            particles.forEach(p => {
+                ctx.fillStyle = p.color;
+                ctx.globalAlpha = p.life;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            ctx.globalAlpha = 1.0;
+            projectiles.forEach((p) => {
+                const px = centerX + Math.cos(p.angle) * p.distance;
+                const py = centerY + Math.sin(p.angle) * p.distance;
+                const nextDist = p.distance + 20;
+                const nx = centerX + Math.cos(p.angle) * nextDist;
+                const ny = centerY + Math.sin(p.angle) * nextDist;
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(px, py);
+                ctx.lineTo(nx, ny);
+                ctx.stroke();
+            });
+            junk.forEach(j => {
+                const jx = centerX + Math.cos(j.angle) * j.distance;
+                const jy = centerY + Math.sin(j.angle) * j.distance;
+                ctx.fillStyle = j.color;
+                ctx.beginPath();
+                if (j.type === 'SMALL') {
+                    ctx.arc(jx, jy, j.size, 0, Math.PI * 2);
+                } else {
+                    ctx.moveTo(jx + j.size, jy);
+                    ctx.lineTo(jx + j.size * 0.5, jy + j.size * 0.8);
+                    ctx.lineTo(jx - j.size * 0.5, jy + j.size * 0.8);
+                    ctx.lineTo(jx - j.size, jy);
+                    ctx.lineTo(jx - j.size * 0.5, jy - j.size * 0.8);
+                    ctx.lineTo(jx + j.size * 0.5, jy - j.size * 0.8);
+                }
+                ctx.fill();
+                ctx.shadowBlur = 5;
+                ctx.shadowColor = j.color;
+                ctx.fill();
+                ctx.shadowBlur = 0;
+            });
+            ctx.restore();
+        }
+
+        requestAnimationFrame(time => {
+            lastTime = time;
+            requestAnimationFrame(update);
+        });
+
+        function gameOver(win) {
+            if (gameState !== 'PLAYING') return;
+            gameState = win ? 'WIN' : 'LOSE';
+            AudioEngine.playSiren(false);
+            overlay.classList.remove('hidden');
+            setTimeout(() => overlay.classList.remove('opacity-0'), 10);
+            startScreen.classList.add('hidden');
+            if (win) {
+                winScreen.classList.remove('hidden');
+                const bonus = chainReactions === 0 ? 500 : 0;
+                document.getElementById('final-score-win').textContent = `SCORE: ${score + bonus}${bonus > 0 ? ' (+500 CLEAN BONUS)' : ''}`;
+            } else {
+                loseScreen.classList.remove('hidden');
+                document.getElementById('final-score-lose').textContent = `SCORE: ${score}`;
+                shakeAmount = 30;
+                AudioEngine.playExplosion(true);
+            }
+            setTimeout(resetGame, 3000);
+        }
+
+        function resetGame() {
+            if (!AudioEngine.ctx) AudioEngine.init();
+            score = 0;
+            combo = 0;
+            comboTimer = 0;
+            chainReactions = 0;
+            timeLeft = GAME_DURATION;
+            junk = [];
+            projectiles = [];
+            particles = [];
+            difficultyLevel = 0;
+            beatTimer = 0;
+            gameState = 'PLAYING';
+            winScreen.classList.add('hidden');
+            loseScreen.classList.add('hidden');
+            overlay.classList.add('opacity-0');
+            setTimeout(() => overlay.classList.add('hidden'), 500);
+        }
+
+        setTimeout(() => {
+            if (gameState === 'START') resetGame();
+        }, 3000);
+    </script>
+</body>
+</html>
