@@ -1,4 +1,4 @@
-const CACHE_NAME = 'daily-reflection-v2';
+const CACHE_NAME = 'daily-reflection-v3';
 const ASSETS = [
   '/',
   '/Daily_Reflection.html',
@@ -29,6 +29,9 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+  // Only intercept GET requests. Let POST/PUT/DELETE pass through.
+  if (event.request.method !== 'GET') return;
+
   event.respondWith(
     caches.match(event.request).then((response) => {
       return response || fetch(event.request);

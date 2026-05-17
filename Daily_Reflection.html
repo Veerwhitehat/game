@@ -11,6 +11,7 @@
         }
     </script>
     <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@300;400;600;700&display=swap" rel="stylesheet">
     <style>
         body {
@@ -165,7 +166,7 @@
     </div>
 
     <script>
-        const API_URL = 'http://localhost:5000';
+        const API_URL = '';
         let stats = {};
         let videos = [];
         let currentTheme = 'light';
@@ -279,7 +280,7 @@
             formData.append('video', blob);
 
             const notes = document.getElementById('entryNotes').value;
-            const today = new Date().toISOString().split('T')[0];
+            formData.append('notes', notes);
 
             try {
                 saveBtn.disabled = true;
@@ -291,7 +292,7 @@
                 });
 
                 if (!uploadRes.ok) {
-                    let errorMessage = "Failed to upload video";
+                    let errorMessage = "Failed to save entry";
                     try {
                         const err = await uploadRes.json();
                         errorMessage = err.error || errorMessage;
@@ -301,14 +302,17 @@
                     throw new Error(errorMessage);
                 }
 
-                // Save notes
-                await fetch(`${API_URL}/stats`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ notes: { [today]: notes } })
-                });
-
                 alert("Entry saved successfully!");
+
+                // Confetti for streak milestones
+                if (stats.streaks > 0 && (stats.streaks % 5 === 0 || stats.streaks === 1)) {
+                    confetti({
+                        particleCount: 150,
+                        spread: 70,
+                        origin: { y: 0.6 }
+                    });
+                }
+
                 showSection('home');
 
                 // Reset recording UI
@@ -323,7 +327,12 @@
 
             } catch (error) {
                 console.error("Save error:", error);
-                alert(error.message);
+                // More descriptive error message
+                let msg = error.message;
+                if (msg === "Failed to fetch") {
+                    msg = "Network Error: Could not connect to the server or request timed out. Please check your internet connection.";
+                }
+                alert(msg);
                 saveBtn.disabled = false;
                 saveBtn.innerText = "Save Entry";
             }
@@ -642,6 +651,32 @@
         const savedTheme = localStorage.getItem('theme') || 'light';
         applyTheme(savedTheme);
 
+        // Notifications and Reminders
+        function setupNotifications() {
+            if (!("Notification" in window)) return;
+
+            if (Notification.permission === "default") {
+                Notification.requestPermission();
+            }
+
+            // Check every minute if it's 8:00 PM and user hasn't recorded
+            setInterval(() => {
+                const now = new Date();
+                const today = now.toISOString().split('T')[0];
+
+                if (now.getHours() === 20 && now.getMinutes() === 0) {
+                    if (stats.last_recorded_date !== today) {
+                        if (Notification.permission === "granted") {
+                            new Notification("Daily Reflection", {
+                                body: "Don't forget to capture your reflection for today!",
+                                icon: "https://lucide.dev/icons/mic.png"
+                            });
+                        }
+                    }
+                }
+            }, 60000);
+        }
+
         // Register Service Worker
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
@@ -653,9 +688,10 @@
             });
         }
 
-        // Initialize Lucide
+        // Initialize
         lucide.createIcons();
         loadStats();
+        setupNotifications();
     </script>
 </body>
 </html>

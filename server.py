@@ -7,6 +7,9 @@ from datetime import datetime, timedelta
 app = Flask(__name__)
 CORS(app)
 
+# Increase max upload size to 500MB
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
+
 VIDEO_DIR = 'videos'
 DATA_FILE = 'data.json'
 
@@ -99,6 +102,8 @@ def upload_video():
         return jsonify({"error": "No video file provided"}), 400
 
     video_file = request.files['video']
+    notes = request.form.get('notes', '')
+
     today_dt = datetime.now()
     today = today_dt.strftime('%Y-%m-%d')
     filename = f"{today}.webm"
@@ -112,6 +117,10 @@ def upload_video():
     # Update metadata
     data = load_data()
     data['total_recorded'] += 1
+
+    # Save notes if provided
+    if notes:
+        data['notes'][today] = notes
 
     # Give a streak freeze every 5 recordings
     if data['total_recorded'] % 5 == 0:
