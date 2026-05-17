@@ -291,8 +291,14 @@
                 });
 
                 if (!uploadRes.ok) {
-                    const err = await uploadRes.json();
-                    throw new Error(err.error || "Failed to upload video");
+                    let errorMessage = "Failed to upload video";
+                    try {
+                        const err = await uploadRes.json();
+                        errorMessage = err.error || errorMessage;
+                    } catch (e) {
+                        errorMessage = `Server Error: ${uploadRes.status} ${uploadRes.statusText}`;
+                    }
+                    throw new Error(errorMessage);
                 }
 
                 // Save notes
