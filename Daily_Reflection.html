@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Daily Reflection</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class'
+        }
+    </script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Josefin Sans', sans-serif;
+        }
+        .recording-pulse {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .5; }
+        }
+        .fade-in {
+            animation: fadeIn 0.5s ease-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-900 dark:bg-slate-900 dark:text-slate-100 min-h-screen transition-colors duration-300">
+    <div id="app" class="max-w-4xl mx-auto px-4 py-8">
+        <!-- Navigation -->
+        <nav class="flex justify-between items-center mb-12">
+            <h1 class="text-3xl font-bold tracking-tight">Daily Reflection</h1>
+            <div class="flex items-center gap-4">
+                <button id="themeToggle" class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
+                    <i data-lucide="sun" id="sunIcon"></i>
+                    <i data-lucide="moon" id="moonIcon" class="hidden"></i>
+                </button>
+                <div class="flex gap-2">
+                    <button onclick="showSection('home')" class="px-4 py-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">Home</button>
+                    <button onclick="showSection('library')" class="px-4 py-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">Library</button>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Home Section -->
+        <section id="homeSection" class="fade-in space-y-8">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="bg-white dark:bg-gray-800 p-8 rounded-3xl shadow-xl space-y-4">
+                    <div class="flex items-center justify-between">
+                        <h2 class="text-xl font-semibold">Current Streak</h2>
+                        <i data-lucide="flame" class="text-orange-500 w-8 h-8"></i>
+                    </div>
+                    <p class="text-5xl font-bold" id="streakCount">0 days</p>
+                    <p id="streakMessage" class="text-sm text-gray-500 dark:text-gray-400">Start your journey today!</p>
+                </div>
+                <div class="bg-white dark:bg-gray-800 p-8 rounded-3xl shadow-xl space-y-4">
+                    <div class="flex items-center justify-between">
+                        <h2 class="text-xl font-semibold">Streak Freezes</h2>
+                        <i data-lucide="snowflake" class="text-blue-400 w-8 h-8"></i>
+                    </div>
+                    <p class="text-5xl font-bold" id="freezeCount">0</p>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">Automatically used for missed days.</p>
+                </div>
+            </div>
+
+            <div class="bg-indigo-600 text-white p-8 rounded-3xl shadow-xl">
+                <h2 class="text-2xl font-bold mb-2">Daily Prompt</h2>
+                <p id="dailyPrompt" class="text-lg opacity-90 italic">"Reflect on something you're grateful for today."</p>
+            </div>
+
+            <div id="motivationMessage" class="text-center py-8">
+                <p class="text-xl font-medium text-gray-600 dark:text-gray-300 italic" id="quoteDisplay">"The only way to do great work is to love what you do."</p>
+            </div>
+
+            <div class="flex justify-center">
+                <button id="startRecordingBtn" onclick="showSection('record')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-12 py-4 rounded-2xl font-bold text-xl shadow-lg transition-transform hover:scale-105">
+                    Start Daily Recording
+                </button>
+                <div id="alreadyRecordedMsg" class="hidden text-center p-6 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-2xl font-semibold border border-green-200 dark:border-green-800">
+                    <i data-lucide="check-circle" class="inline-block mr-2"></i>
+                    Today's recording is done. Come back tomorrow!
+                </div>
+            </div>
+        </section>
+
+        <!-- Record Section -->
+        <section id="recordSection" class="hidden fade-in space-y-6">
+            <div class="relative bg-black rounded-3xl overflow-hidden aspect-video shadow-2xl">
+                <video id="preview" autoplay muted class="w-full h-full object-cover"></video>
+                <div id="recordingIndicator" class="hidden absolute top-6 left-6 flex items-center gap-2 bg-red-600 text-white px-3 py-1 rounded-full text-sm font-bold recording-pulse">
+                    <div class="w-2 h-2 bg-white rounded-full"></div>
+                    REC
+                </div>
+                <div id="timer" class="absolute top-6 right-6 bg-black/50 text-white px-4 py-1 rounded-full font-mono text-xl">00:00</div>
+            </div>
+
+            <div class="flex flex-col items-center gap-6">
+                <div class="flex gap-4">
+                    <button id="recordBtn" class="bg-red-600 hover:bg-red-700 text-white p-6 rounded-full shadow-lg transition-transform hover:scale-110">
+                        <i data-lucide="mic" id="recordIcon" class="w-8 h-8"></i>
+                    </button>
+                    <button id="stopBtn" class="hidden bg-gray-800 text-white p-6 rounded-full shadow-lg transition-transform hover:scale-110">
+                        <i data-lucide="square" class="w-8 h-8"></i>
+                    </button>
+                    <button id="saveBtn" class="hidden bg-green-600 hover:bg-green-700 text-white px-8 py-4 rounded-2xl font-bold shadow-lg transition-transform hover:scale-105">
+                        Save Entry
+                    </button>
+                </div>
+                <p id="recordingStatus" class="text-gray-500 font-medium">Click to start recording (2-7 mins)</p>
+                <textarea id="entryNotes" placeholder="Add some notes about your day..." class="w-full p-4 rounded-2xl border dark:border-gray-700 bg-white dark:bg-gray-800 focus:ring-2 focus:ring-indigo-500 outline-none h-32 resize-none"></textarea>
+            </div>
+        </section>
+
+        <!-- Library Section -->
+        <section id="librarySection" class="hidden fade-in space-y-8">
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <h2 class="text-3xl font-bold">Your Journey</h2>
+                <div class="flex gap-2 w-full md:w-auto">
+                    <input type="text" id="searchInput" placeholder="Search notes..." class="flex-1 p-2 rounded-lg border dark:border-gray-700 bg-white dark:bg-gray-800 outline-none">
+                    <input type="date" id="dateFilter" class="p-2 rounded-lg border dark:border-gray-700 bg-white dark:bg-gray-800 outline-none">
+                </div>
+            </div>
+
+            <div id="calendarView" class="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-lg mb-8">
+                <!-- Calendar content will be injected here -->
+            </div>
+
+            <div id="videoGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                <!-- Grid items will be injected here -->
+            </div>
+        </section>
+    </div>
+
+    <!-- Video Modal -->
+    <div id="videoModal" class="hidden fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4">
+        <div class="bg-white dark:bg-gray-800 rounded-3xl overflow-hidden max-w-4xl w-full">
+            <div class="flex justify-between items-center p-4 border-b dark:border-gray-700">
+                <h3 id="modalDate" class="text-xl font-bold">Recording Date</h3>
+                <button onclick="closeModal()" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <video id="modalPlayer" controls class="w-full aspect-video bg-black"></video>
+            <div class="p-6 space-y-4">
+                <div id="modalNote" class="text-gray-600 dark:text-gray-300 italic"></div>
+                <div class="flex justify-between items-center">
+                    <div class="flex gap-2">
+                        <button id="exportBtn" class="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700">
+                            <i data-lucide="download" class="w-4 h-4"></i> Export
+                        </button>
+                    </div>
+                    <button id="deleteBtn" class="flex items-center gap-2 px-4 py-2 bg-red-100 text-red-600 rounded-xl hover:bg-red-200 transition-colors">
+                        <i data-lucide="trash-2" class="w-4 h-4"></i> Delete
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = '';
+        let stats = {};
+        let videos = [];
+        let currentTheme = 'light';
+        let mediaRecorder;
+        let recordedChunks = [];
+        let startTime;
+        let timerInterval;
+        let stream;
+
+        function showSection(sectionId) {
+            ['home', 'record', 'library'].forEach(s => {
+                document.getElementById(s + 'Section').classList.add('hidden');
+            });
+            document.getElementById(sectionId + 'Section').classList.remove('hidden');
+            lucide.createIcons();
+
+            if (sectionId === 'library') loadLibrary();
+            if (sectionId === 'home') loadStats();
+            if (sectionId === 'record') startCamera();
+            else stopCamera();
+        }
+
+        async function startCamera() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                document.getElementById('preview').srcObject = stream;
+            } catch (err) {
+                console.error("Error accessing camera:", err);
+                alert("Could not access camera/microphone.");
+            }
+        }
+
+        function stopCamera() {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                document.getElementById('preview').srcObject = null;
+            }
+        }
+
+        const recordBtn = document.getElementById('recordBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const saveBtn = document.getElementById('saveBtn');
+        const timerDisplay = document.getElementById('timer');
+        const statusDisplay = document.getElementById('recordingStatus');
+        const indicator = document.getElementById('recordingIndicator');
+
+        recordBtn.addEventListener('click', startRecording);
+        stopBtn.addEventListener('click', stopRecording);
+
+        function startRecording() {
+            recordedChunks = [];
+            mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+
+            mediaRecorder.ondataavailable = (e) => {
+                if (e.data.size > 0) recordedChunks.push(e.data);
+            };
+
+            mediaRecorder.onstop = handleStop;
+
+            mediaRecorder.start();
+            startTime = Date.now();
+            updateTimer();
+            timerInterval = setInterval(updateTimer, 1000);
+
+            recordBtn.classList.add('hidden');
+            stopBtn.classList.remove('hidden');
+            indicator.classList.remove('hidden');
+            statusDisplay.innerText = "Recording... (Max 7 mins)";
+            statusDisplay.classList.add('text-red-600');
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+                clearInterval(timerInterval);
+                stopBtn.classList.add('hidden');
+                indicator.classList.add('hidden');
+            }
+        }
+
+        function updateTimer() {
+            const elapsed = Math.floor((Date.now() - startTime) / 1000);
+            const mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
+            const secs = (elapsed % 60).toString().padStart(2, '0');
+            timerDisplay.innerText = `${mins}:${secs}`;
+
+            if (elapsed >= 420) { // 7 minutes
+                stopRecording();
+            }
+        }
+
+        function handleStop() {
+            const duration = Math.floor((Date.now() - startTime) / 1000);
+            if (duration < 120) { // 2 minutes
+                alert("Recording must be at least 2 minutes long.");
+                recordBtn.classList.remove('hidden');
+                statusDisplay.innerText = "Recording too short. Try again.";
+                statusDisplay.classList.remove('text-red-600');
+                return;
+            }
+
+            saveBtn.classList.remove('hidden');
+            statusDisplay.innerText = "Recording complete! Ready to save.";
+            statusDisplay.classList.remove('text-red-600');
+            statusDisplay.classList.add('text-green-600');
+        }
+
+        saveBtn.addEventListener('click', async () => {
+            const blob = new Blob(recordedChunks, { type: 'video/webm' });
+            const formData = new FormData();
+            formData.append('video', blob);
+
+            const notes = document.getElementById('entryNotes').value;
+            formData.append('notes', notes);
+
+            try {
+                saveBtn.disabled = true;
+                saveBtn.innerText = "Saving...";
+
+                const uploadRes = await fetch(`${API_URL}/upload`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!uploadRes.ok) {
+                    let errorMessage = "Failed to save entry";
+                    try {
+                        const err = await uploadRes.json();
+                        errorMessage = err.error || errorMessage;
+                    } catch (e) {
+                        errorMessage = `Server Error: ${uploadRes.status} ${uploadRes.statusText}`;
+                    }
+                    throw new Error(errorMessage);
+                }
+
+                alert("Entry saved successfully!");
+
+                // Confetti for streak milestones
+                if (stats.streaks > 0 && (stats.streaks % 5 === 0 || stats.streaks === 1)) {
+                    confetti({
+                        particleCount: 150,
+                        spread: 70,
+                        origin: { y: 0.6 }
+                    });
+                }
+
+                showSection('home');
+
+                // Reset recording UI
+                saveBtn.classList.add('hidden');
+                saveBtn.disabled = false;
+                saveBtn.innerText = "Save Entry";
+                recordBtn.classList.remove('hidden');
+                statusDisplay.innerText = "Click to start recording (2-7 mins)";
+                statusDisplay.classList.remove('text-green-600');
+                document.getElementById('entryNotes').value = "";
+                timerDisplay.innerText = "00:00";
+
+            } catch (error) {
+                console.error("Save error:", error);
+                // More descriptive error message
+                let msg = error.message;
+                if (msg === "Failed to fetch") {
+                    msg = "Network Error: Could not connect to the server or request timed out. Please check your internet connection.";
+                }
+                alert(msg);
+                saveBtn.disabled = false;
+                saveBtn.innerText = "Save Entry";
+            }
+        });
+
+        async function loadLibrary() {
+            const grid = document.getElementById('videoGrid');
+            grid.innerHTML = '<div class="col-span-full text-center py-12 text-gray-500">Loading your reflections...</div>';
+
+            try {
+                const response = await fetch(`${API_URL}/videos`);
+                videos = await response.json();
+
+                renderLibrary(videos);
+            } catch (error) {
+                console.error("Failed to load library:", error);
+                grid.innerHTML = '<div class="col-span-full text-center py-12 text-red-500">Failed to load recordings.</div>';
+            }
+        }
+
+        function renderLibrary(videoList) {
+            const grid = document.getElementById('videoGrid');
+            grid.innerHTML = '';
+
+            if (videoList.length === 0) {
+                grid.innerHTML = '<div class="col-span-full text-center py-12 text-gray-500">No recordings yet. Start your journey today!</div>';
+                return;
+            }
+
+            videoList.forEach(video => {
+                const card = document.createElement('div');
+                card.className = "bg-white dark:bg-gray-800 rounded-3xl overflow-hidden shadow-lg hover:shadow-xl transition-shadow cursor-pointer group";
+                card.onclick = () => openVideo(video);
+
+                const thumbnailId = `thumb-${video.date}`;
+                card.innerHTML = `
+                    <div class="relative aspect-video bg-gray-200 dark:bg-gray-700">
+                        <canvas id="${thumbnailId}" class="w-full h-full object-cover"></canvas>
+                        <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 bg-black/20 transition-opacity">
+                            <i data-lucide="play" class="text-white w-12 h-12"></i>
+                        </div>
+                    </div>
+                    <div class="p-4 flex justify-between items-center">
+                        <div>
+                            <p class="font-bold">${formatDate(video.date)}</p>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">${video.note ? video.note.substring(0, 30) + '...' : 'No notes'}</p>
+                        </div>
+                        ${isToday(video.date) ? `
+                            <button onclick="event.stopPropagation(); deleteEntry('${video.date}')" class="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full">
+                                <i data-lucide="trash-2" class="w-5 h-5"></i>
+                            </button>
+                        ` : ''}
+                    </div>
+                `;
+                grid.appendChild(card);
+                generateThumbnail(video.url, thumbnailId);
+            });
+            lucide.createIcons();
+            renderCalendar();
+        }
+
+        function formatDate(dateStr) {
+            const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+            return new Date(dateStr).toLocaleDateString(undefined, options);
+        }
+
+        function isToday(dateStr) {
+            return dateStr === new Date().toISOString().split('T')[0];
+        }
+
+        function renderCalendar() {
+            const calendar = document.getElementById('calendarView');
+            const today = new Date();
+            const year = today.getFullYear();
+            const month = today.getMonth();
+
+            const firstDay = new Date(year, month, 1);
+            const lastDay = new Date(year, month + 1, 0);
+            const daysInMonth = lastDay.getDate();
+            const startingDay = firstDay.getDay();
+
+            const recordedDates = new Set(videos.map(v => v.date));
+            const monthName = today.toLocaleString('default', { month: 'long' });
+
+            let html = `
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-xl font-bold">${monthName} ${year}</h3>
+                    <div class="flex items-center gap-2 text-xs">
+                        <div class="w-3 h-3 bg-indigo-600 rounded-sm"></div> Recorded
+                    </div>
+                </div>
+                <div class="grid grid-cols-7 gap-2 text-center">
+                    ${['S', 'M', 'T', 'W', 'T', 'F', 'S'].map(d => `<div class="font-bold text-gray-400">${d}</div>`).join('')}
+                    ${Array(startingDay).fill('<div></div>').join('')}
+            `;
+
+            for (let i = 1; i <= daysInMonth; i++) {
+                const dateStr = `${year}-${(month + 1).toString().padStart(2, '0')}-${i.toString().padStart(2, '0')}`;
+                const isRecorded = recordedDates.has(dateStr);
+                const isCurrent = isToday(dateStr);
+
+                html += `
+                    <div class="aspect-square flex items-center justify-center rounded-lg text-sm
+                        ${isRecorded ? 'bg-indigo-600 text-white font-bold' : 'bg-gray-100 dark:bg-gray-700'}
+                        ${isCurrent ? 'ring-2 ring-indigo-400 ring-offset-2 dark:ring-offset-gray-800' : ''}">
+                        ${i}
+                    </div>
+                `;
+            }
+
+            html += '</div>';
+            calendar.innerHTML = html;
+        }
+
+        function generateThumbnail(videoUrl, canvasId) {
+            const video = document.createElement('video');
+            video.src = `${API_URL}${videoUrl}`;
+            video.crossOrigin = "anonymous";
+            video.muted = true;
+
+            video.onloadeddata = () => {
+                // Seek to a random point (but skip first 2 seconds to avoid black screen)
+                const duration = video.duration;
+                const randomTime = Math.random() * (duration - 2) + 2;
+                video.currentTime = randomTime;
+            };
+
+            video.onseeked = () => {
+                const canvas = document.getElementById(canvasId);
+                if (!canvas) return;
+                const ctx = canvas.getContext('2d');
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            };
+        }
+
+        let currentVideo = null;
+
+        function openVideo(video) {
+            currentVideo = video;
+            const modal = document.getElementById('videoModal');
+            const player = document.getElementById('modalPlayer');
+            const dateDisplay = document.getElementById('modalDate');
+            const noteDisplay = document.getElementById('modalNote');
+            const deleteBtn = document.getElementById('deleteBtn');
+
+            dateDisplay.innerText = formatDate(video.date);
+            noteDisplay.innerText = video.note || "No notes for this reflection.";
+            player.src = `${API_URL}${video.url}`;
+
+            if (isToday(video.date)) {
+                deleteBtn.classList.remove('hidden');
+            } else {
+                deleteBtn.classList.add('hidden');
+            }
+
+            modal.classList.remove('hidden');
+            player.play();
+        }
+
+        function closeModal() {
+            const modal = document.getElementById('videoModal');
+            const player = document.getElementById('modalPlayer');
+            player.pause();
+            player.src = "";
+            modal.classList.add('hidden');
+        }
+
+        async function deleteEntry(date) {
+            if (!confirm("Are you sure you want to delete today's reflection?")) return;
+
+            try {
+                const response = await fetch(`${API_URL}/videos/${date}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    alert("Deleted successfully.");
+                    closeModal();
+                    loadLibrary();
+                    loadStats();
+                } else {
+                    const err = await response.json();
+                    alert(err.error);
+                }
+            } catch (error) {
+                console.error("Delete error:", error);
+            }
+        }
+
+        document.getElementById('deleteBtn').onclick = () => {
+            if (currentVideo) deleteEntry(currentVideo.date);
+        };
+
+        document.getElementById('exportBtn').onclick = async () => {
+            if (!currentVideo) return;
+            try {
+                const response = await fetch(`${API_URL}${currentVideo.url}`);
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = `Reflection-${currentVideo.date}.webm`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+            } catch (error) {
+                console.error("Export error:", error);
+                alert("Failed to export video.");
+            }
+        };
+
+        const quotes = [
+            "The only way to do great work is to love what you do. - Steve Jobs",
+            "Believe you can and you're halfway there. - Theodore Roosevelt",
+            "Reflect on your present blessings, of which every man has many. - Charles Dickens",
+            "The unexamined life is not worth living. - Socrates",
+            "Your daily reflection is a mirror of your progress.",
+            "Consistency is the key to breakthroughs.",
+            "Each day is a new opportunity to grow."
+        ];
+
+        const prompts = [
+            "Reflect on something you're grateful for today.",
+            "What was the most challenging part of your day?",
+            "What is one thing you learned today?",
+            "How did you move closer to your goals today?",
+            "Describe a moment that made you smile today.",
+            "What would you do differently if you could relive today?",
+            "Who are you thankful for today?"
+        ];
+
+        function setMotivationalContent() {
+            const randomQuote = quotes[Math.floor(Math.random() * quotes.length)];
+            const randomPrompt = prompts[Math.floor(Math.random() * prompts.length)];
+
+            document.getElementById('quoteDisplay').innerText = `"${randomQuote}"`;
+            document.getElementById('dailyPrompt').innerText = `"${randomPrompt}"`;
+        }
+
+        async function loadStats() {
+            setMotivationalContent();
+            try {
+                const response = await fetch(`${API_URL}/stats`);
+                stats = await response.json();
+
+                document.getElementById('streakCount').innerText = `${stats.streaks} days`;
+                document.getElementById('freezeCount').innerText = stats.streak_freezes;
+
+                if (stats.streaks > 0) {
+                    document.getElementById('streakMessage').innerText = `You're on a ${stats.streaks}-day streak! Keep it up!`;
+                }
+
+                const today = new Date().toISOString().split('T')[0];
+                if (stats.last_recorded_date === today) {
+                    document.getElementById('startRecordingBtn').classList.add('hidden');
+                    document.getElementById('alreadyRecordedMsg').classList.remove('hidden');
+                } else {
+                    document.getElementById('startRecordingBtn').classList.remove('hidden');
+                    document.getElementById('alreadyRecordedMsg').classList.add('hidden');
+                }
+
+                applyTheme(stats.theme || 'light');
+            } catch (error) {
+                console.error('Failed to load stats:', error);
+            }
+        }
+
+        document.getElementById('searchInput').addEventListener('input', filterVideos);
+        document.getElementById('dateFilter').addEventListener('change', filterVideos);
+
+        function filterVideos() {
+            const query = document.getElementById('searchInput').value.toLowerCase();
+            const date = document.getElementById('dateFilter').value;
+
+            const filtered = videos.filter(v => {
+                const matchesQuery = v.note && v.note.toLowerCase().includes(query);
+                const matchesDate = !date || v.date === date;
+                return (query ? matchesQuery : true) && matchesDate;
+            });
+
+            renderLibrary(filtered);
+        }
+
+        function applyTheme(theme) {
+            currentTheme = theme;
+            if (theme === 'dark') {
+                document.documentElement.classList.add('dark');
+                document.getElementById('sunIcon').classList.add('hidden');
+                document.getElementById('moonIcon').classList.remove('hidden');
+            } else {
+                document.documentElement.classList.remove('dark');
+                document.getElementById('sunIcon').classList.remove('hidden');
+                document.getElementById('moonIcon').classList.add('hidden');
+            }
+            localStorage.setItem('theme', theme);
+        }
+
+        document.getElementById('themeToggle').addEventListener('click', async () => {
+            const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+            applyTheme(newTheme);
+            try {
+                await fetch(`${API_URL}/stats`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ theme: newTheme })
+                });
+            } catch (error) {
+                console.error('Failed to sync theme with server:', error);
+            }
+        });
+
+        // Initial theme check
+        const savedTheme = localStorage.getItem('theme') || 'light';
+        applyTheme(savedTheme);
+
+        // Notifications and Reminders
+        function setupNotifications() {
+            if (!("Notification" in window)) return;
+
+            if (Notification.permission === "default") {
+                Notification.requestPermission();
+            }
+
+            // Check every minute if it's 8:00 PM and user hasn't recorded
+            setInterval(() => {
+                const now = new Date();
+                const today = now.toISOString().split('T')[0];
+
+                if (now.getHours() === 20 && now.getMinutes() === 0) {
+                    if (stats.last_recorded_date !== today) {
+                        if (Notification.permission === "granted") {
+                            new Notification("Daily Reflection", {
+                                body: "Don't forget to capture your reflection for today!",
+                                icon: "https://lucide.dev/icons/mic.png"
+                            });
+                        }
+                    }
+                }
+            }, 60000);
+        }
+
+        // Register Service Worker
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js').then(reg => {
+                    console.log('SW registered:', reg);
+                }).catch(err => {
+                    console.log('SW failed:', err);
+                });
+            });
+        }
+
+        // Initialize
+        lucide.createIcons();
+        loadStats();
+        setupNotifications();
+    </script>
+</body>
+</html>
