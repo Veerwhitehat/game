@@ -1,0 +1,33 @@
+{
+  "users": [
+    {
+      "id": "1780832009026",
+      "username": "jules_v3",
+      "displayName": "Jules Engineer",
+      "password": "$2b$10$5.E3oZY51xASDwkRjtAa6ek3Nud86Vmc.Me9s4yugz8ANorNjqoN6",
+      "avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=jules_v3",
+      "createdAt": "2026-06-07T11:33:29.026Z"
+    },
+    {
+      "id": "1780832084660",
+      "username": "jules_v5",
+      "displayName": "Jules Engineer",
+      "password": "$2b$10$r6XvR714yiIiILK9ha0j8uUw71k9WeudTG5OpYg.4fUEtmaQOZrkC",
+      "avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=jules_v5",
+      "createdAt": "2026-06-07T11:34:44.660Z"
+    },
+    {
+      "id": "1780832236442",
+      "username": "final_user",
+      "displayName": "Final Engineer",
+      "password": "$2b$10$KPH7UYiGy84OXcJq4o5ZV.36s4Ey7ARkq2TgJWGVENztot8tFc2fW",
+      "avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=final_user",
+      "createdAt": "2026-06-07T11:37:16.442Z"
+    }
+  ],
+  "posts": [],
+  "friends": [],
+  "requests": [],
+  "messages": [],
+  "notes": []
+}
