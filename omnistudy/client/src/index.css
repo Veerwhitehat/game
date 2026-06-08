@@ -1,0 +1,6 @@
+@import "tailwindcss";
+@theme { --color-insta-dark: #000000; --color-insta-border: #262626; --color-insta-accent: #0095f6; --color-insta-grey: #8e8e8e; }
+@layer base {
+  body { @apply bg-white text-black transition-colors duration-200; }
+  .dark body { @apply bg-insta-dark text-white; }
+}
