@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-[#050505] text-gakuen-white antialiased font-light selection:bg-gakuen-crimson/30;
+  }
+}
+
+.manga-border {
+  @apply border border-gakuen-white/10;
+}
+
+.anime-panel {
+  @apply bg-gakuen-charcoal/40 backdrop-blur-md border border-gakuen-white/10 p-6 rounded-sm transition-all duration-300;
+}
+
+.anime-panel:hover {
+  @apply border-gakuen-white/30 bg-gakuen-charcoal/60;
+}
+
+.btn-crimson {
+  @apply bg-gakuen-crimson text-white px-8 py-3 font-medium uppercase tracking-[0.3em] hover:bg-red-600 transition-all duration-500 relative overflow-hidden;
+}
+
+.btn-gold {
+  @apply border border-gakuen-gold text-gakuen-gold px-8 py-3 font-medium uppercase tracking-[0.3em] hover:bg-gakuen-gold hover:text-gakuen-navy transition-all duration-500;
+}
+
+.glass-nav {
+  @apply bg-black/20 backdrop-blur-xl border-r border-white/5;
+}
+
+/* Scrollbar refinement */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-gakuen-white/10 hover:bg-gakuen-white/20;
+}
